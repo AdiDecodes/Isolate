@@ -1,0 +1,11 @@
+node_modules/
+dist/
+stems/
+*.log
+
+.env
+server/.env
+server/deploy/isolate.env
+server/start.bat
+
+.commandcode/

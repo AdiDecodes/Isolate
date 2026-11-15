@@ -1,0 +1,17 @@
+[Unit]
+Description=Isolate separation server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=isolate
+WorkingDirectory=/opt/isolate/server
+ExecStartPre=/usr/bin/test -f dist/index.js
+ExecStart=/usr/bin/node dist/index.js
+EnvironmentFile=/opt/isolate/server/deploy/isolate.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

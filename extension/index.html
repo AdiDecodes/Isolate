@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --card: #1c1c1c;
+    --line: #2a2a2a;
+    --text: #f1f1f1;
+    --dim: #9a9a9a;
+    --accent: #ff3d3d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 300px;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+  }
+  .hidden { display: none !important; }
+  .empty { padding: 28px 16px; text-align: center; color: var(--dim); }
+  #reloadTab {
+    margin-top: 12px; border: 0; border-radius: 8px;
+    background: var(--accent); color: #fff; padding: 7px 14px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+
+  .hero { display: flex; gap: 10px; padding: 12px 12px 8px; }
+  .hero img {
+    width: 104px; height: 58px; object-fit: cover;
+    border-radius: 6px; background: var(--card); flex: none;
+  }
+  .meta { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+  #title {
+    font-weight: 600; font-size: 12.5px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  #vid { color: var(--dim); font-size: 11px; }
+
+  .segment {
+    display: flex; margin: 6px 12px;
+    background: var(--card); border-radius: 10px; padding: 3px; gap: 3px;
+  }
+  .segment button {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 8px 0; border: 0; border-radius: 8px;
+    background: transparent; color: var(--dim); cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .segment button svg { width: 18px; height: 18px; fill: currentColor; }
+  .segment button:hover { color: var(--text); }
+  .segment button.active { background: var(--accent); color: #fff; }
+
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    margin: 4px 12px; padding: 9px 10px;
+    background: var(--card); border-radius: 10px;
+  }
+  .row svg { width: 16px; height: 16px; fill: var(--accent); flex: none; }
+  .row .label { flex: 1; }
+
+  .switch { position: relative; width: 34px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; border-radius: 20px;
+    background: #3a3a3a; cursor: pointer; transition: background .15s;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 14px; height: 14px;
+    left: 3px; top: 3px; border-radius: 50%; background: #fff;
+    transition: transform .15s;
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(14px); }
+
+  .status { margin: 4px 12px 10px; padding: 8px 10px; background: var(--card); border-radius: 10px; }
+  #statusText { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+  #statusText.err { color: var(--accent); }
+  .bar { height: 4px; border-radius: 2px; background: #3a3a3a; overflow: hidden; }
+  #fill { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width .3s; }
+
+  #errtext { margin: 0 12px 10px; color: var(--accent); font-size: 11.5px; word-break: break-word; }
+
+  #sepNow {
+    display: block;
+    margin: 0 12px 10px;
+    width: calc(100% - 24px);
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    padding: 9px;
+    font: 600 12.5px "Roboto", "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+  #sepNow:hover { filter: brightness(1.1); }
+  #sepNow.hidden { display: none; }
+</style>
+</head>
+<body>
+  <div id="novideo" class="empty hidden">
+    <div id="novideoText">Open a YouTube video</div>
+    <button id="reloadTab" class="hidden">Reload page</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="hero">
+      <img id="thumb" alt="">
+      <div class="meta">
+        <div id="title"></div>
+        <div id="vid"></div>
+      </div>
+    </div>
+
+    <div class="segment" id="modes">
+      <button data-mode="vocals" title="Vocals only">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.49 6-3.31 6-6.72h-1.7z"/></svg>
+      </button>
+      <button data-mode="whole" title="Original mix">
+        <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+      </button>
+      <button data-mode="bgm" title="Music only">
+        <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+      </button>
+    </div>
+
+    <div class="row">
+      <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+      <span class="label">AI separation</span>
+      <label class="switch">
+        <input type="checkbox" id="aiToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="row">
+      <svg viewBox="0 0 24 24"><path d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12 18.15 11 21 11 21z"/></svg>
+      <span class="label">Auto-separate</span>
+      <label class="switch">
+        <input type="checkbox" id="autoToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <button id="sepNow" class="hidden">Separate now</button>
+
+    <div id="status" class="status hidden">
+      <div id="statusText"></div>
+      <div class="bar hidden" id="bar"><div id="fill"></div></div>
+    </div>
+    <div id="errtext" class="hidden"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
