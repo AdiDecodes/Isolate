@@ -4,7 +4,6 @@
   const MSG = "cc-isolate";
   const MODES = ["vocals", "whole", "bgm"];
   const FLOAT_ID = "cc-isolate-float";
-  const FLOAT_LABEL_ID = "cc-isolate-float-label";
 
   let mode = "whole";
   let aiEnabled = false;
@@ -40,7 +39,6 @@
     mode = next;
     persist({ isolateMode: next });
     updateFloatingButton();
-    if (!immediate) floatLabel(MODE_META[next].label);
     sendMode(next);
   }
 
@@ -402,12 +400,6 @@
       applyMode(next);
     });
 
-    if (!document.getElementById(FLOAT_LABEL_ID)) {
-      const label = document.createElement("div");
-      label.id = FLOAT_LABEL_ID;
-      document.body.append(label);
-    }
-
     // Topbar placement: left of YouTube's Create button, styled like the
     // other masthead buttons. Falls back to the floating bubble when the
     // masthead isn't present (e.g. YT Music layout changes).
@@ -442,16 +434,6 @@
       );
     }
     btn.title = "Isolate: " + meta.label;
-  }
-
-  let labelTimer = null;
-  function floatLabel(text, sticky = false) {
-    const el = document.getElementById(FLOAT_LABEL_ID);
-    if (!el) return;
-    el.textContent = text;
-    el.classList.add("show");
-    clearTimeout(labelTimer);
-    if (!sticky) labelTimer = setTimeout(() => el.classList.remove("show"), 1600);
   }
 
   function updateRing(stage, pct) {
@@ -489,21 +471,8 @@
   }
 
   function updateAiStatus(stage, pct, message, sec) {
+    // Ring state only — details live in the popup.
     updateRing(stage, pct);
-    let text = null;
-    if (stage === "requested") text = "AI requested…";
-    else if (stage === "extracting") text = "Resolving stream…";
-    else if (stage === "downloading") text = pct != null ? `Fetching audio ${pct}%` : "Fetching audio…";
-    else if (stage === "uploading") text = `Uploading ${pct ?? 0}%`;
-    else if (stage === "cloud") text = sec != null ? `Separating… ${sec}s` : "Separating…";
-    else if (stage === "decoding") text = "Decoding…";
-    else if (stage === "cached-ready") text = "Cached — ready to isolate";
-    else if (stage === "cached") text = pct != null ? `Cached stems ${pct}%` : "Loading cached stems…";
-    else if (stage === "separating") text = pct != null ? `Separating ${pct}%` : "Separating…";
-    else if (stage === "done") text = "AI stems ready";
-    else if (stage === "off") text = "AI off";
-    else if (stage === "error") text = "AI: " + (message || "failed");
-    if (text) floatLabel(text, stage === "error");
   }
 
   /* ---------------- lifecycle ---------------- */
