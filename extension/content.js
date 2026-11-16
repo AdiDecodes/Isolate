@@ -404,19 +404,20 @@
       applyMode(next);
     });
 
-    // Topbar placement: left of YouTube's Create button, styled like the
-    // other masthead buttons. Falls back to the floating bubble when the
-    // masthead isn't present (e.g. YT Music layout changes).
+    // Topbar placement: left of the Create button (YouTube) or the account /
+    // settings buttons (YT Music). Anchor off the buttons themselves instead
+    // of container ids — those differ between layouts and over time. Falls
+    // back to the floating bubble when no topbar anchor exists.
     const masthead = document.querySelector("ytd-masthead, ytmusic-nav-bar");
-    const end =
-      masthead &&
-      masthead.querySelector(
-        "#end, #right-content, #right-header-button-section"
+    if (masthead) {
+      const anchor = masthead.querySelector(
+        "#create-button, ytmusic-account-button, ytmusic-settings-button, ytd-topbar-menu-button-renderer"
       );
-    const create = masthead && masthead.querySelector("#create-button");
-    if (end) {
-      if (create && create.parentNode === end) end.insertBefore(btn, create);
-      else end.prepend(btn);
+      if (anchor && anchor.parentNode) {
+        anchor.parentNode.insertBefore(btn, anchor);
+      } else {
+        masthead.appendChild(btn);
+      }
     } else {
       document.body.append(btn);
     }
