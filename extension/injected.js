@@ -338,6 +338,9 @@
         }
       }
     } else if (d.kind === "ai-segment") {
+      // Malformed segments (e.g. arrays flattened to objects by extension
+      // messaging) would poison coverage math with NaN frames — drop them.
+      if (!d.vocalsL || !d.vocalsL.length) return;
       ai.segments.push({
         startFrame: d.startFrame,
         frames: d.vocalsL.length,

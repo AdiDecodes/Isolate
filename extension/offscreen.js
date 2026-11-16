@@ -119,14 +119,16 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
   for (let s = 0; s < frames; s += segFrames) {
     if (job.cancelled || currentJob !== job) return;
     const e = Math.min(s + segFrames, frames);
+    // chrome.runtime messaging JSON-serializes: typed arrays would arrive as
+    // plain objects without .length, so send plain arrays (as /separate does).
     report(videoId, {
       type: "ai-segment",
       startFrame: s,
       sampleRate: SR,
-      vocalsL: vL.slice(s, e),
-      vocalsR: vR.slice(s, e),
-      bgmL: bL.slice(s, e),
-      bgmR: bR.slice(s, e),
+      vocalsL: Array.from(vL.subarray(s, e)),
+      vocalsR: Array.from(vR.subarray(s, e)),
+      bgmL: Array.from(bL.subarray(s, e)),
+      bgmR: Array.from(bR.subarray(s, e)),
     });
     if (!readySent && e >= readyAt) {
       readySent = true;

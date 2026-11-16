@@ -181,7 +181,8 @@
       updateAiStatus("blocked", null, aiStatus.message);
       return;
     }
-    if (duration == null || duration > 600) {
+    if (duration == null) return; // metadata not loaded yet — retry on the next tick
+    if (duration > 600) {
       aiStatus = { stage: "blocked", pct: null, sec: null, message: "Longer than 10 min — skipped" };
       updateAiStatus("blocked", null, aiStatus.message);
       return;
@@ -216,6 +217,8 @@
     }
     // Passive probe: is this song already separated on the server? If so,
     // light the FAB green and (when AI is on) fetch the stems right away.
+    // requestIfNeeded is idempotent (lastRequestedVideoId guard), so calling
+    // it every tick safely retries until the video metadata is ready.
     if (videoId && videoId !== lastCacheCheck) {
       lastCacheCheck = videoId;
       try {
@@ -224,10 +227,10 @@
           if (currentVideoId() !== videoId) return;
           songCached = true;
           indicateCached();
-          if (aiEnabled && lastIsMusic) requestIfNeeded(true);
         });
       } catch (e) {}
     }
+    if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
   }, 800);
 
   // Only surface the cached hint when nothing else is going on — never

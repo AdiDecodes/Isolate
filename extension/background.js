@@ -76,7 +76,11 @@ function jobActive(job) {
 
 async function routeToTab(msg) {
   const job = jobs.get(msg.videoId);
-  if (job) job.ts = Date.now();
+  if (job) {
+    job.ts = Date.now();
+    // Track terminal states so jobActive() stops blocking re-requests.
+    if (msg.type === "ai-progress" && msg.stage === "done") job.stage = "done";
+  }
   const tabId = job?.tabId;
   if (tabId == null) return;
   try {
