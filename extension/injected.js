@@ -416,10 +416,32 @@
   });
   setInterval(hookVideos, 2000);
 
+  function currentVideoIdMain() {
+    // URL first (watch pages). YT Music also plays from home/explore pages
+    // where the URL carries no ?v= — read it from the player instead.
+    try {
+      const u = new URLSearchParams(location.search).get("v");
+      if (u) return u;
+    } catch (e) {}
+    try {
+      const player = document.querySelector("ytmusic-player, #movie_player");
+      if (player && typeof player.getPlayerResponse === "function") {
+        const id = player.getPlayerResponse()?.videoDetails?.videoId;
+        if (id) return id;
+      }
+    } catch (e) {}
+    try {
+      const a = document.querySelector("ytmusic-player-bar .title");
+      const m = /v=([A-Za-z0-9_-]{11})/.exec((a && a.getAttribute("href")) || "");
+      if (m) return m[1];
+    } catch (e) {}
+    return null;
+  }
+
   function pushMeta() {
     let pr = null;
     try {
-      const player = document.getElementById("movie_player");
+      const player = document.querySelector("ytmusic-player, #movie_player");
       if (player && typeof player.getPlayerResponse === "function") {
         pr = player.getPlayerResponse();
       }
@@ -433,6 +455,7 @@
         type: MSG,
         kind: "meta",
         isMusic: location.hostname === "music.youtube.com" || micro?.category === "Music",
+        videoId: currentVideoIdMain(),
       },
       window.location.origin
     );

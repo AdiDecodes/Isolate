@@ -17,6 +17,7 @@
   let stemFetchFailed = false; // stop retry loops; use the offscreen path
   let songCached = false;
   let lastIsMusic = false;
+  let metaVideoId = null; // videoId reported by the player (YT Music inline playback)
 
   const SERVER = "https://isolate443.duckdns.org";
 
@@ -74,6 +75,7 @@
       pushAiState();
       post({ kind: "get-meta" });
     } else if (e.data.kind === "meta") {
+      metaVideoId = d.videoId || null;
       lastIsMusic = !!e.data.isMusic;
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
       // Meta may arrive after the cache probe — retry the autofetch then.
@@ -180,11 +182,13 @@
   }
 
   function currentVideoId() {
+    // Watch pages have ?v=; YT Music inline playback doesn't — fall back to
+    // the videoId the page engine reads from the player.
     try {
-      return new URLSearchParams(location.search).get("v") || null;
-    } catch (e) {
-      return null;
-    }
+      const v = new URLSearchParams(location.search).get("v");
+      if (v) return v;
+    } catch (e) {}
+    return metaVideoId;
   }
 
   function requestIfNeeded(force = false) {
