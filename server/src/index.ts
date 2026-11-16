@@ -11,6 +11,25 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, model: config.spaceModel });
 });
 
+app.get("/stems/:id/:file", (req, res) => {
+  const id = String(req.params.id || "");
+  const m = /^(vocals|bgm)\.m4a$/.exec(String(req.params.file || ""));
+  if (!isValidVideoId(id) || !m) {
+    res.status(400).json({ error: "invalid request" });
+    return;
+  }
+  if (!cache.hasCached(id)) {
+    res.status(404).json({ error: "not cached" });
+    return;
+  }
+  const file = m[1] === "vocals" ? cache.vocalsFile(id) : cache.bgmFile(id);
+  res.sendFile(file, { headers: { "Cache-Control": "no-store" } }, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ error: "stem read failed" });
+    }
+  });
+});
+
 app.get("/separate", async (req, res) => {
   const videoId = String(req.query.id || "");
   if (!isValidVideoId(videoId)) {
@@ -106,7 +125,9 @@ app.get("/separate", async (req, res) => {
       }
       if (carry.length < overlapBytesServer) return;
       const look = carry.subarray(0, overlapBytesServer);
-      carry = carry.subarray(overlapBytesServer);
+      // The look-ahead stays at the head of `carry`: those same samples form
+      // the start of the next core, so consecutive cores remain contiguous
+      // and no audio is skipped between windows.
       const extPcm = Buffer.concat([prevTail, coreBuf, look]);
       engine.enqueue({ ext: pcmToFloat(extPcm), core: pcmToFloat(coreBuf) });
       prevTail = Buffer.from(coreBuf.subarray(segmentBytesServer - overlapBytesServer));

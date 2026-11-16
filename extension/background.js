@@ -3,7 +3,7 @@
 // server and routes the resulting stems back to the tab.
 
 const OFFSCREEN_URL = "offscreen.html";
-const API_ROOT = "http://127.0.0.1:3000";
+const API_ROOT = "https://isolate443.duckdns.org";
 
 const jobs = new Map(); // videoId -> { tabId, stage, ts }
 

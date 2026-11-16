@@ -23,6 +23,7 @@
       case "uploading": return s.pct != null ? `Uploading ${s.pct}%` : "Uploading…";
       case "cloud": return s.sec != null ? `Separating… ${s.sec}s` : "Separating…";
       case "decoding": return "Decoding…";
+      case "cached": return s.pct != null ? `Cached stems ${s.pct}%` : "Loading cached stems…";
       case "separating": return s.pct != null ? `Stems ${s.pct}%` : "Delivering stems…";
       default: return s.stage;
     }

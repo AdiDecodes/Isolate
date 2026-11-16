@@ -302,6 +302,9 @@
     } else if (stage === "done") {
       btn.classList.add("cc-ring-green");
       off = 0;
+    } else if (stage === "cached") {
+      btn.classList.add("cc-ring-green");
+      if (typeof pct === "number") off = RING_CIRC * (1 - pct / 100);
     }
     bar.style.strokeDashoffset = off;
   }
@@ -315,6 +318,7 @@
     else if (stage === "uploading") text = `Uploading ${pct ?? 0}%`;
     else if (stage === "cloud") text = sec != null ? `Separating… ${sec}s` : "Separating…";
     else if (stage === "decoding") text = "Decoding…";
+    else if (stage === "cached") text = pct != null ? `Cached stems ${pct}%` : "Loading cached stems…";
     else if (stage === "separating") text = pct != null ? `Separating ${pct}%` : "Separating…";
     else if (stage === "done") text = "AI stems ready";
     else if (stage === "off") text = "AI off";

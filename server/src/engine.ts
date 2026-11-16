@@ -1,7 +1,6 @@
 import {
   segmentFrames,
   overlapFrames,
-  fadeFrames,
   segmentBytes,
   overlapBytes,
   bytesPerFrame,
@@ -31,7 +30,8 @@ export function createEngine(hooks: EngineHooks) {
   let queued = 0;
   let delivered = 0;
   let estimatedTotal = 0;
-  let pendingVocals: { idx: number; vExt: [Float32Array, Float32Array] } | null = null;
+  let pendingPrev: { idx: number; vExt: [Float32Array, Float32Array] } | null = null;
+  let pendingCur: { idx: number; vExt: [Float32Array, Float32Array] } | null = null;
 
   const onChainError = (e: Error) => {
     chainError = chainError || e;
@@ -58,30 +58,32 @@ export function createEngine(hooks: EngineHooks) {
     uploadChain.catch(() => {});
 
     gpuChain = gpuChain
-      .then(() => uploadChain)
-      .then(async () => {
-        if (hooks.cancelled()) throw new Error("cancelled");
-        const outputs = await separateOnSpace(uploadPaths.get(idx)!);
-        const vExt = await fetchAlignedVocals(idx, outputs, expectedLen);
+    .then(() => uploadChain)
+    .then(async () => {
+      if (hooks.cancelled()) throw new Error("cancelled");
+      const outputs = await separateOnSpace(uploadPaths.get(idx)!);
+      const vExt = await fetchAlignedVocals(idx, outputs, expectedLen);
 
-        if (pendingVocals) {
-          deliverCore(pendingVocals.idx, pendingVocals.vExt, vExt);
-          pendingVocals = null;
-          delivered++;
-          const pct = estimatedTotal
-            ? Math.min(99, Math.round((delivered / estimatedTotal) * 100))
-            : null;
-          hooks.onProgress(pct);
-        }
-        pendingVocals = { idx, vExt };
-      })
-      .catch(onChainError);
+      if (pendingCur) {
+        deliverCore(pendingCur.idx, pendingPrev?.vExt ?? null, pendingCur.vExt, vExt);
+        pendingPrev = pendingCur;
+        pendingCur = null;
+        delivered++;
+        const pct = estimatedTotal
+          ? Math.min(99, Math.round((delivered / estimatedTotal) * 100))
+          : null;
+        hooks.onProgress(pct);
+      }
+      pendingCur = { idx, vExt };
+    })
+    .catch(onChainError);
     gpuChain.catch(() => {});
   }
 
   function deliverCore(
     idx: number,
-    vExt: [Float32Array, Float32Array],
+    prevVExt: [Float32Array, Float32Array] | null,
+    curVExt: [Float32Array, Float32Array],
     nextVExt: [Float32Array, Float32Array] | null
   ) {
     const entry = mixPending.get(idx);
@@ -89,22 +91,40 @@ export function createEngine(hooks: EngineHooks) {
     mixPending.delete(idx);
     const core = entry.core;
     const C = core[0].length;
+    const O = Math.min(overlapFrames, Math.floor(C / 2));
 
+    // Each window's vocals estimate covers this core plus overlap on both
+    // sides, so adjacent windows agree on a 2*overlap-wide shared region.
+    // Blend the two estimates across that whole region with one linear
+    // weight per absolute frame: the same weight applies from either side
+    // of a boundary, which makes every seam sample-continuous instead of
+    // hard-switching between edge-region estimates.
     const vL = new Float32Array(C);
     const vR = new Float32Array(C);
     for (let i = 0; i < C; i++) {
-      vL[i] = vExt[0][overlapFrames + i];
-      vR[i] = vExt[1][overlapFrames + i];
+      vL[i] = curVExt[0][overlapFrames + i];
+      vR[i] = curVExt[1][overlapFrames + i];
     }
-
+    if (prevVExt) {
+      // Seam before this core: weight of the previous estimate falls 0.5 -> 0
+      // across the first `overlap` frames (it already carried 0.5 at the seam
+      // from the previous segment's tail blend).
+      for (let i = 0; i < O; i++) {
+        const t = 0.5 + (0.5 * i) / O;
+        const p = segmentFrames + overlapFrames + i;
+        vL[i] = prevVExt[0][p] * (1 - t) + curVExt[0][overlapFrames + i] * t;
+        vR[i] = prevVExt[1][p] * (1 - t) + curVExt[1][overlapFrames + i] * t;
+      }
+    }
     if (nextVExt) {
-      const blend = Math.min(fadeFrames, C);
-      for (let i = 0; i < blend; i++) {
-        const t = (i + 1) / (blend + 1);
-        const j = C - blend + i;
-        const src = overlapFrames - fadeFrames + i;
-        vL[j] = vL[j] * (1 - t) + nextVExt[0][src] * t;
-        vR[j] = vR[j] * (1 - t) + nextVExt[1][src] * t;
+      // Seam after this core: weight of the current estimate falls 1 -> 0.5
+      // across the last `overlap` frames; the next segment's head blend
+      // continues 0.5 -> 0 with the same per-frame weight.
+      for (let i = C - O; i < C; i++) {
+        const u = (i - (C - O)) / (2 * O);
+        const n = i - (C - O);
+        vL[i] = curVExt[0][overlapFrames + i] * (1 - u) + nextVExt[0][n] * u;
+        vR[i] = curVExt[1][overlapFrames + i] * (1 - u) + nextVExt[1][n] * u;
       }
     }
 
@@ -150,9 +170,10 @@ export function createEngine(hooks: EngineHooks) {
         throw chainError || e;
       });
       if (chainError) throw chainError;
-      if (pendingVocals) {
-        deliverCore(pendingVocals.idx, pendingVocals.vExt, null);
-        pendingVocals = null;
+      if (pendingCur) {
+        deliverCore(pendingCur.idx, pendingPrev?.vExt ?? null, pendingCur.vExt, null);
+        pendingCur = null;
+        pendingPrev = null;
         delivered++;
       }
     },

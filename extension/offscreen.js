@@ -36,6 +36,14 @@ async function runJob(videoId) {
   const job = currentJob;
 
   try {
+    const cached = await fetchCachedStems(videoId);
+    if (cached) {
+      await deliverCached(job, videoId, cached);
+      if (!job.cancelled) {
+        report(videoId, { type: "ai-progress", stage: "done", pct: 100 });
+      }
+      return;
+    }
     let api;
     try {
       api = await fetch(API_ROOT + "/separate?id=" + encodeURIComponent(videoId));
@@ -62,6 +70,57 @@ async function runJob(videoId) {
       job.done = true;
       currentJob = null;
     }
+  }
+}
+
+// Cached songs skip the raw-PCM /separate stream entirely: the server hands
+// over the small AAC stems and we decode them locally, which starts playback
+// in a second or two instead of after a ~100 MB transfer.
+async function fetchCachedStems(videoId) {
+  try {
+    const [vRes, bRes] = await Promise.all([
+      fetch(API_ROOT + "/stems/" + videoId + "/vocals.m4a"),
+      fetch(API_ROOT + "/stems/" + videoId + "/bgm.m4a"),
+    ]);
+    if (!vRes.ok || !bRes.ok) return null;
+    return [await vRes.arrayBuffer(), await bRes.arrayBuffer()];
+  } catch (e) {
+    return null;
+  }
+}
+
+async function deliverCached(job, videoId, [vBuf, bBuf]) {
+  report(videoId, { type: "ai-progress", stage: "decoding", pct: null });
+  const ctx = new OfflineAudioContext(2, 1, SR);
+  const [vocals, bgm] = await Promise.all([
+    ctx.decodeAudioData(vBuf),
+    ctx.decodeAudioData(bBuf),
+  ]);
+  if (job.cancelled || currentJob !== job) return;
+
+  const frames = Math.min(vocals.length, bgm.length);
+  const segFrames = 10 * SR;
+  const vL = vocals.getChannelData(0);
+  const vR = vocals.getChannelData(1);
+  const bL = bgm.getChannelData(0);
+  const bR = bgm.getChannelData(1);
+  for (let s = 0; s < frames; s += segFrames) {
+    if (job.cancelled || currentJob !== job) return;
+    const e = Math.min(s + segFrames, frames);
+    report(videoId, {
+      type: "ai-segment",
+      startFrame: s,
+      sampleRate: SR,
+      vocalsL: vL.slice(s, e),
+      vocalsR: vR.slice(s, e),
+      bgmL: bL.slice(s, e),
+      bgmR: bR.slice(s, e),
+    });
+    report(videoId, {
+      type: "ai-progress",
+      stage: "cached",
+      pct: Math.min(99, Math.round((e / frames) * 100)),
+    });
   }
 }
 
