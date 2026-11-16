@@ -408,7 +408,11 @@
     // other masthead buttons. Falls back to the floating bubble when the
     // masthead isn't present (e.g. YT Music layout changes).
     const masthead = document.querySelector("ytd-masthead, ytmusic-nav-bar");
-    const end = masthead && masthead.querySelector("#end, #right-header-button-section");
+    const end =
+      masthead &&
+      masthead.querySelector(
+        "#end, #right-content, #right-header-button-section"
+      );
     const create = masthead && masthead.querySelector("#create-button");
     if (end) {
       if (create && create.parentNode === end) end.insertBefore(btn, create);
