@@ -13,6 +13,16 @@ const app = express();
 // the real client for anonymous identity and per-IP rate limits.
 app.set("trust proxy", 1);
 
+// Access log — visible in `journalctl -u isolate`, the main diagnostic for
+// "the extension did/didn't request X" questions.
+app.use((req, res, next) => {
+  const started = Date.now();
+  res.on("finish", () => {
+    console.log(`${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - started}ms)`);
+  });
+  next();
+});
+
 // Express 4 does not catch async handler errors — route them to the error
 // middleware so failures (e.g. Mongo down) become JSON 500s, not resets.
 const ah =
@@ -68,6 +78,10 @@ app.get("/cached/:id", stemsLimiter, (req, res) => {
 });
 
 app.get("/stems/:id/:file", stemsLimiter, (req, res) => {
+  // Content scripts fetch stems directly from the tab (MV3 applies page CORS
+  // rules to content-script fetches), so allow any origin for this public,
+  // immutable, per-video audio cache.
+  res.set("Access-Control-Allow-Origin", "*");
   const id = String(req.params.id || "");
   const m = /^(vocals|bgm)\.m4a$/.exec(String(req.params.file || ""));
   if (!isValidVideoId(id) || !m) {
