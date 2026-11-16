@@ -3,6 +3,7 @@
 
   const $ = (id) => document.getElementById(id);
   let tabId = null;
+  let lastState = null;
 
   async function activeTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -63,8 +64,9 @@
     for (const btn of document.querySelectorAll("#modes button")) {
       btn.classList.toggle("active", btn.dataset.mode === state.mode);
     }
-    $("aiToggle").checked = !!state.aiEnabled;
-    $("autoToggle").checked = state.autoSeparate !== false;
+    lastState = state;
+    $("aiBtn").classList.toggle("active", !!state.aiEnabled);
+    $("autoBtn").classList.toggle("active", state.autoSeparate !== false);
     $("sepNow").classList.toggle(
       "hidden",
       !(state.aiEnabled && state.autoSeparate === false)
@@ -100,13 +102,13 @@
     });
   }
 
-  $("aiToggle").addEventListener("change", async (e) => {
-    await send({ type: "popup-toggle-ai", enable: e.target.checked });
+  $("aiBtn").addEventListener("click", async () => {
+    await send({ type: "popup-toggle-ai", enable: !(lastState && lastState.aiEnabled) });
     refresh();
   });
 
-  $("autoToggle").addEventListener("change", async (e) => {
-    await send({ type: "popup-set-auto", value: e.target.checked });
+  $("autoBtn").addEventListener("click", async () => {
+    await send({ type: "popup-set-auto", value: !(lastState && lastState.autoSeparate !== false) });
     refresh();
   });
 
