@@ -384,7 +384,10 @@
   const RING_CIRC = 2 * Math.PI * 27;
 
   function ensureFloatingButton() {
-    if (document.getElementById(FLOAT_ID)) return;
+    const existing = document.getElementById(FLOAT_ID);
+    if (existing && existing.isConnected) return;
+    if (existing) existing.remove();
+
     const btn = document.createElement("button");
     btn.id = FLOAT_ID;
     btn.innerHTML =
@@ -398,9 +401,25 @@
       const next = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
       applyMode(next);
     });
-    const label = document.createElement("div");
-    label.id = FLOAT_LABEL_ID;
-    document.body.append(label, btn);
+
+    if (!document.getElementById(FLOAT_LABEL_ID)) {
+      const label = document.createElement("div");
+      label.id = FLOAT_LABEL_ID;
+      document.body.append(label);
+    }
+
+    // Topbar placement: left of YouTube's Create button, styled like the
+    // other masthead buttons. Falls back to the floating bubble when the
+    // masthead isn't present (e.g. YT Music layout changes).
+    const masthead = document.querySelector("ytd-masthead, ytmusic-nav-bar");
+    const end = masthead && masthead.querySelector("#end, #right-header-button-section");
+    const create = masthead && masthead.querySelector("#create-button");
+    if (end) {
+      if (create && create.parentNode === end) end.insertBefore(btn, create);
+      else end.prepend(btn);
+    } else {
+      document.body.append(btn);
+    }
     updateFloatingButton();
   }
 
