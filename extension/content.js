@@ -11,6 +11,8 @@
   let autoSeparate = true;
   let lastVideoId = null;
   let lastRequestedVideoId = null;
+  let lastCacheCheck = null;
+  let songCached = false;
   let lastIsMusic = false;
 
   /* ---------------- mode + AI plumbing ---------------- */
@@ -70,6 +72,8 @@
     } else if (e.data.kind === "meta") {
       lastIsMusic = !!e.data.isMusic;
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
+      // Meta may arrive after the cache probe — retry the autofetch then.
+      if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
     }
   });
 
@@ -205,10 +209,36 @@
     if (videoId !== lastVideoId) {
       lastVideoId = videoId;
       lastRequestedVideoId = null;
+      lastCacheCheck = null;
+      songCached = false;
       aiStatus = { stage: null, pct: null, sec: null, message: null };
       pushAiState();
     }
+    // Passive probe: is this song already separated on the server? If so,
+    // light the FAB green and (when AI is on) fetch the stems right away.
+    if (videoId && videoId !== lastCacheCheck) {
+      lastCacheCheck = videoId;
+      try {
+        chrome.runtime.sendMessage({ type: "cache-check", videoId }, (res) => {
+          if (chrome.runtime.lastError || !res || !res.cached) return;
+          if (currentVideoId() !== videoId) return;
+          songCached = true;
+          indicateCached();
+          if (aiEnabled && lastIsMusic) requestIfNeeded(true);
+        });
+      } catch (e) {}
+    }
   }, 800);
+
+  // Only surface the cached hint when nothing else is going on — never
+  // overwrite an in-flight job, error, or done state.
+  function indicateCached() {
+    const idle =
+      !aiStatus.stage || aiStatus.stage === "off" || aiStatus.stage === "standby";
+    if (!idle) return;
+    aiStatus = { stage: "cached-ready", pct: 100, sec: null, message: null };
+    updateAiStatus("cached-ready", 100);
+  }
 
   /* ---------------- floating mode button ---------------- */
 
@@ -307,6 +337,10 @@
     } else if (stage === "done") {
       btn.classList.add("cc-ring-green");
       off = 0;
+    } else if (stage === "cached-ready") {
+      // Song is already separated on the server: full green ring.
+      btn.classList.add("cc-ring-green");
+      off = 0;
     } else if (stage === "cached") {
       btn.classList.add("cc-ring-green");
       if (typeof pct === "number") off = RING_CIRC * (1 - pct / 100);
@@ -323,6 +357,7 @@
     else if (stage === "uploading") text = `Uploading ${pct ?? 0}%`;
     else if (stage === "cloud") text = sec != null ? `Separating… ${sec}s` : "Separating…";
     else if (stage === "decoding") text = "Decoding…";
+    else if (stage === "cached-ready") text = "Cached — ready to isolate";
     else if (stage === "cached") text = pct != null ? `Cached stems ${pct}%` : "Loading cached stems…";
     else if (stage === "separating") text = pct != null ? `Separating ${pct}%` : "Separating…";
     else if (stage === "done") text = "AI stems ready";

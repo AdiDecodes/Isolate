@@ -7,12 +7,46 @@ const API_ROOT = "https://isolate443.duckdns.org";
 
 const jobs = new Map(); // videoId -> { tabId, stage, ts }
 
+// Login polling runs here (not in the popup): opening the login tab closes
+// the popup, so its own poll loop would die before the user finishes
+// signing in. The service worker keeps polling and stores the token.
+let authPollingCode = null;
+
+async function pollAuth(code) {
+  if (!code || authPollingCode === code) return;
+  authPollingCode = code;
+  const deadline = Date.now() + 10 * 60 * 1000;
+  try {
+    while (Date.now() < deadline && authPollingCode === code) {
+      try {
+        const res = await fetch(API_ROOT + "/auth/poll?code=" + encodeURIComponent(code));
+        const data = await res.json();
+        if (data.status === "ok" && data.token) {
+          await chrome.storage.local.set({ token: data.token });
+          authPollingCode = null;
+          chrome.runtime.sendMessage({ type: "auth-ok" }).catch(() => {});
+          return;
+        }
+      } catch (e) {}
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  } finally {
+    if (authPollingCode === code) authPollingCode = null;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log("[isolate] message:", msg.type, msg.videoId || "");
   if (msg.type === "ai-request") {
     handleRequest(msg.videoId, sender.tab?.id).catch((e) =>
       reportError(msg.videoId, String(e && e.message ? e.message : e))
     );
+    sendResponse({ ok: true });
+  } else if (msg.type === "cache-check") {
+    isCached(msg.videoId).then((cached) => sendResponse({ cached }));
+    return true; // async sendResponse
+  } else if (msg.type === "auth-begin") {
+    pollAuth(msg.code);
     sendResponse({ ok: true });
   } else if (
     msg.type === "ai-progress" ||
@@ -69,11 +103,32 @@ async function ensureOffscreen() {
   }
 }
 
+// Does the server already hold separated stems for this video? Memoized so
+// repeated probes (video-change ticks, job starts) don't hit the network.
+const cachedProbe = new Map(); // videoId -> { cached, ts }
+const PROBE_TTL_MS = 10 * 60 * 1000;
+
+async function isCached(videoId) {
+  if (!videoId) return false;
+  const hit = cachedProbe.get(videoId);
+  if (hit && Date.now() - hit.ts < PROBE_TTL_MS) return hit.cached;
+  let cached = false;
+  try {
+    const res = await fetch(API_ROOT + "/cached/" + encodeURIComponent(videoId));
+    if (res.ok) cached = !!(await res.json()).cached;
+  } catch (e) {}
+  cachedProbe.set(videoId, { cached, ts: Date.now() });
+  return cached;
+}
+
 async function handleRequest(videoId, tabId, start) {
   if (!videoId || tabId == null) return;
   if (jobActive(jobs.get(videoId))) return;
-  jobs.set(videoId, { tabId, stage: "extracting", ts: Date.now() });
-  routeToTab({ type: "ai-progress", videoId, stage: "extracting" });
+
+  const cached = await isCached(videoId);
+  // Cached songs skip straight to stem fetch — no "Resolving stream…" stage.
+  jobs.set(videoId, { tabId, stage: cached ? "processing" : "extracting", ts: Date.now() });
+  if (!cached) routeToTab({ type: "ai-progress", videoId, stage: "extracting" });
 
   await ensureOffscreen();
 

@@ -57,6 +57,16 @@ app.get("/me", attachIdentity, ah(me));
 
 /* ---------------- stems ---------------- */
 
+// Cheap probe: does the server have separated stems for this video?
+app.get("/cached/:id", stemsLimiter, (req, res) => {
+  const id = String(req.params.id || "");
+  if (!isValidVideoId(id)) {
+    res.status(400).json({ error: "invalid video id" });
+    return;
+  }
+  res.json({ cached: cache.hasCached(id) });
+});
+
 app.get("/stems/:id/:file", stemsLimiter, (req, res) => {
   const id = String(req.params.id || "");
   const m = /^(vocals|bgm)\.m4a$/.exec(String(req.params.file || ""));

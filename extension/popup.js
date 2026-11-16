@@ -23,6 +23,7 @@
       case "uploading": return s.pct != null ? `Uploading ${s.pct}%` : "Uploading…";
       case "cloud": return s.sec != null ? `Separating… ${s.sec}s` : "Separating…";
       case "decoding": return "Decoding…";
+      case "cached-ready": return "Song cached — stems ready";
       case "cached": return s.pct != null ? `Cached stems ${s.pct}%` : "Loading cached stems…";
       case "separating": return s.pct != null ? `Stems ${s.pct}%` : "Delivering stems…";
       default: return s.stage;
@@ -123,7 +124,6 @@
   /* ---------------- account ---------------- */
 
   const SERVER = "https://isolate443.duckdns.org";
-  let signingIn = false;
 
   function getToken() {
     return chrome.storage.local.get("token").then((d) => d.token || null);
@@ -169,31 +169,26 @@
   }
 
   $("signin").addEventListener("click", async () => {
-    if (signingIn) return;
-    signingIn = true;
-    const btn = $("signin");
-    btn.disabled = true;
-    btn.textContent = "Waiting…";
+    const code = crypto.randomUUID();
     try {
-      const code = crypto.randomUUID();
       await chrome.tabs.create({
         url: SERVER + "/auth?code=" + encodeURIComponent(code),
       });
-      // Poll until the login tab completes or ~2 minutes pass.
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const res = await fetch(SERVER + "/auth/poll?code=" + encodeURIComponent(code));
-        const data = await res.json();
-        if (data.status === "ok" && data.token) {
-          await chrome.storage.local.set({ token: data.token });
-          break;
-        }
-      }
     } catch (e) {}
-    signingIn = false;
-    btn.disabled = false;
-    btn.textContent = "Sign in";
-    await refreshAccount();
+    // Opening the tab closes this popup; the background service worker
+    // owns the polling and stores the token, then broadcasts auth-ok.
+    chrome.runtime.sendMessage({ type: "auth-begin", code });
+    const btn = $("signin");
+    btn.disabled = true;
+    btn.textContent = "Waiting…";
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = "Sign in";
+    }, 5000);
+  });
+
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === "auth-ok") refreshAccount();
   });
 
   $("signout").addEventListener("click", async () => {
