@@ -12,8 +12,13 @@
   let lastVideoId = null;
   let lastRequestedVideoId = null;
   let lastCacheCheck = null;
+  let cacheState = "idle"; // idle | pending | cached | miss
+  let pendingAfterProbe = null;
+  let stemFetch = null; // { videoId } while the direct fetch runs
   let songCached = false;
   let lastIsMusic = false;
+
+  const SERVER = "https://isolate443.duckdns.org";
 
   /* ---------------- mode + AI plumbing ---------------- */
 
@@ -74,6 +79,20 @@
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
       // Meta may arrive after the cache probe — retry the autofetch then.
       if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
+    } else if (e.data.kind === "ai-stems-done") {
+      // Direct fetch path: the page engine decoded and segmented both stems.
+      const videoId = currentVideoId();
+      if (!stemFetch || stemFetch.videoId !== videoId || !stemFetch.decoded) return;
+      stemFetch = null;
+      lastRequestedVideoId = videoId;
+      aiStatus = { stage: "done", pct: 100, sec: null, message: null };
+      updateAiStatus("done", 100);
+      post({ kind: "ai-done" });
+    } else if (e.data.kind === "ai-stems-failed") {
+      stemFetch = null;
+      // Direct path broke (e.g. decode) — fall back to the offscreen pipeline.
+      lastRequestedVideoId = null;
+      if (aiEnabled) requestIfNeeded(true);
     }
   });
 
@@ -193,6 +212,18 @@
       return;
     }
 
+    // Cached songs: fetch the stems directly in this tab and hand the raw
+    // binary to the page engine — no extension-messaging JSON relay.
+    if (cacheState === "cached") {
+      lastRequestedVideoId = videoId;
+      startStemsFetch(videoId);
+      return;
+    }
+    if (cacheState === "pending") {
+      pendingAfterProbe = force; // decide after the probe answers
+      return;
+    }
+
     lastRequestedVideoId = videoId;
     try {
       chrome.runtime.sendMessage({ type: "ai-request", videoId });
@@ -203,6 +234,64 @@
     updateAiStatus("requested");
   }
 
+  // Direct fetch of both cached stems with download progress on the ring.
+  // Uses the browser HTTP cache on repeat plays (server sends immutable).
+  function startStemsFetch(videoId) {
+    if (stemFetch) return;
+    stemFetch = { videoId };
+    aiStatus = { stage: "cached", pct: 0, sec: null, message: null };
+    updateAiStatus("cached", 0);
+
+    const fetchStem = async (file) => {
+      const res = await fetch(`${SERVER}/stems/${videoId}/${file}`);
+      if (!res.ok) throw new Error(`stems unavailable (${res.status})`);
+      const total = Number(res.headers.get("Content-Length")) || 0;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        got += value.length;
+        if (total && stemFetch && stemFetch.videoId === videoId) {
+          // 0-50% per file, so both together map to 0-100%.
+          const pct = Math.min(50, Math.round((got / total) * 50));
+          aiStatus.pct = stemFetch.vocalsDone ? 50 + pct : pct;
+          updateAiStatus("cached", aiStatus.pct);
+        }
+      }
+      let len = 0;
+      for (const c of chunks) len += c.length;
+      const out = new Uint8Array(len);
+      let off = 0;
+      for (const c of chunks) {
+        out.set(c, off);
+        off += c.length;
+      }
+      return out.buffer;
+    };
+
+    (async () => {
+      try {
+        const vocals = await fetchStem("vocals.m4a");
+        if (!stemFetch || stemFetch.videoId !== videoId) return;
+        stemFetch.vocalsDone = true;
+        const bgm = await fetchStem("bgm.m4a");
+        if (!stemFetch || stemFetch.videoId !== videoId) return;
+        // Keep stemFetch alive until the engine reports back (ai-stems-done).
+        stemFetch.decoded = true;
+        post({ kind: "ai-stems", vocals, bgm, sampleRate: 44100 });
+      } catch (e) {
+        if (!stemFetch || stemFetch.videoId !== videoId) return;
+        stemFetch = null;
+        // Direct path failed — fall back to the offscreen pipeline.
+        lastRequestedVideoId = null;
+        requestIfNeeded(true);
+      }
+    })();
+  }
+
   // SPA navigation: new video -> reset engine state, wait for fresh meta.
   setInterval(() => {
     const videoId = currentVideoId();
@@ -211,27 +300,49 @@
       lastVideoId = videoId;
       lastRequestedVideoId = null;
       lastCacheCheck = null;
+      cacheState = "idle";
+      pendingAfterProbe = null;
+      stemFetch = null;
       songCached = false;
       aiStatus = { stage: null, pct: null, sec: null, message: null };
       pushAiState();
     }
-    // Passive probe: is this song already separated on the server? If so,
-    // light the FAB green and (when AI is on) fetch the stems right away.
-    // requestIfNeeded is idempotent (lastRequestedVideoId guard), so calling
-    // it every tick safely retries until the video metadata is ready.
+    // Passive probe: is this song already separated on the server? Cached
+    // songs light the FAB green and take the fast direct-fetch path below —
+    // bulk audio must NOT go through chrome.runtime messaging (JSON hop).
     if (videoId && videoId !== lastCacheCheck) {
       lastCacheCheck = videoId;
+      cacheState = "pending";
+      songCached = false;
       try {
         chrome.runtime.sendMessage({ type: "cache-check", videoId }, (res) => {
-          if (chrome.runtime.lastError || !res || !res.cached) return;
-          if (currentVideoId() !== videoId) return;
-          songCached = true;
-          indicateCached();
+          if (chrome.runtime.lastError) {
+            cacheState = "miss";
+            runPendingRequest();
+            return;
+          }
+          const cached = !!(res && res.cached) && currentVideoId() === videoId;
+          cacheState = cached ? "cached" : "miss";
+          if (cached) {
+            songCached = true;
+            indicateCached();
+          }
+          runPendingRequest();
         });
-      } catch (e) {}
+      } catch (e) {
+        cacheState = "miss";
+        runPendingRequest();
+      }
     }
     if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
   }, 800);
+
+  function runPendingRequest() {
+    if (pendingAfterProbe == null) return;
+    const force = pendingAfterProbe;
+    pendingAfterProbe = null;
+    requestIfNeeded(force);
+  }
 
   // Only surface the cached hint when nothing else is going on — never
   // overwrite an in-flight job, error, or done state.

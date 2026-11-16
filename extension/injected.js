@@ -337,6 +337,55 @@
           } catch (e) {}
         }
       }
+    } else if (d.kind === "ai-stems") {
+      // Direct path: raw AAC stems handed over as binary (structured clone).
+      // Decode + segment here so no bulk audio ever crosses the extension
+      // messaging boundary.
+      const sr = d.sampleRate || 44100;
+      (async () => {
+        try {
+          const octx = new OfflineAudioContext(2, 1, sr);
+          const [vocals, bgm] = await Promise.all([
+            octx.decodeAudioData(d.vocals),
+            octx.decodeAudioData(d.bgm),
+          ]);
+          const frames = Math.min(vocals.length, bgm.length);
+          const segFrames = 10 * sr;
+          const vL = vocals.getChannelData(0);
+          const vR = vocals.getChannelData(1);
+          const bL = bgm.getChannelData(0);
+          const bR = bgm.getChannelData(1);
+          for (let s = 0; s < frames; s += segFrames) {
+            const e = Math.min(s + segFrames, frames);
+            ai.segments.push({
+              startFrame: s,
+              frames: e - s,
+              sr,
+              vocalsL: vL.slice(s, e),
+              vocalsR: vR.slice(s, e),
+              bgmL: bL.slice(s, e),
+              bgmR: bR.slice(s, e),
+              vocalsBuf: null,
+              bgmBuf: null,
+            });
+          }
+          ai.waiting = false;
+          const video = getVideo();
+          if (ai.enabled && video && !video.paused && !ai.sched && mode !== "whole") {
+            rescheduleStems(video);
+          }
+          window.postMessage({ type: MSG, kind: "ai-stems-done" }, window.location.origin);
+        } catch (e) {
+          window.postMessage(
+            {
+              type: MSG,
+              kind: "ai-stems-failed",
+              message: String(e && e.message ? e.message : e),
+            },
+            window.location.origin
+          );
+        }
+      })();
     } else if (d.kind === "ai-segment") {
       // Malformed segments (e.g. arrays flattened to objects by extension
       // messaging) would poison coverage math with NaN frames — drop them.
