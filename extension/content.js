@@ -75,7 +75,7 @@
       pushAiState();
       post({ kind: "get-meta" });
     } else if (e.data.kind === "meta") {
-      metaVideoId = d.videoId || null;
+      metaVideoId = e.data.videoId || null;
       lastIsMusic = !!e.data.isMusic;
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
       // Meta may arrive after the cache probe — retry the autofetch then.
