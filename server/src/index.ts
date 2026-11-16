@@ -62,13 +62,13 @@ app.get("/auth", authPage);
 app.get("/auth/google", googleStart);
 app.get("/auth/google/callback", ah(googleCallback));
 app.get("/auth/poll", authPollLimiter, ah(authPoll));
-app.post("/auth/logout", attachIdentity, ah(logout));
+app.post("/auth/logout", logout);
 app.get("/me", attachIdentity, ah(me));
 
 /* ---------------- stems ---------------- */
 
 // Cheap probe: does the server have separated stems for this video?
-app.get("/cached/:id", stemsLimiter, (req, res) => {
+app.get("/cached/:id", stemsLimiter, attachIdentity, (req, res) => {
   const id = String(req.params.id || "");
   if (!isValidVideoId(id)) {
     res.status(400).json({ error: "invalid video id" });
@@ -77,7 +77,7 @@ app.get("/cached/:id", stemsLimiter, (req, res) => {
   res.json({ cached: cache.hasCached(id) });
 });
 
-app.get("/stems/:id/:file", stemsLimiter, (req, res) => {
+app.get("/stems/:id/:file", stemsLimiter, attachIdentity, (req, res) => {
   // Content scripts fetch stems directly from the tab (MV3 applies page CORS
   // rules to content-script fetches), so allow any origin for this public,
   // immutable, per-video audio cache.
@@ -263,7 +263,7 @@ app.get("/separate", separateLimiter, attachIdentity, ah(async (req, res) => {
   proc.on("error", (e) => fail(new Error(`ffmpeg failed: ${e.message}`)));
 }));
 
-app.get("/mp3", separateLimiter, async (req, res) => {
+app.get("/mp3", separateLimiter, attachIdentity, async (req, res) => {
   const videoId = String(req.query.id || "");
   if (!isValidVideoId(videoId)) {
     res.status(400).json({ error: "invalid video id" });

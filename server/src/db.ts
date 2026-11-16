@@ -10,6 +10,10 @@ export interface UserDoc {
   picture?: string;
   createdAt: Date;
   enabled: boolean;
+  // Hard block: reject every authenticated request (separate, stems, mp3, me),
+  // not just separation. Set per user via
+  // db.users.updateOne({email}, {$set: {isBlocked: true}})
+  isBlocked?: boolean;
   limits: UsageLimits;
 }
 
@@ -95,6 +99,7 @@ export async function upsertGoogleUser(profile: {
         googleSub: profile.sub,
         createdAt: now,
         enabled: true,
+        isBlocked: false,
         limits: { ...defaultUserLimits },
       },
     },

@@ -44,6 +44,11 @@ export const attachIdentity: RequestHandler = async (
     if (token) {
       const user = await userByToken(token);
       if (user) {
+        // Hard block: rejected before any route logic runs.
+        if (user.isBlocked === true) {
+          res.status(403).json({ error: "Account blocked", code: "blocked" });
+          return;
+        }
         res.locals.identity = {
           key: "u:" + user._id.toHexString(),
           user,

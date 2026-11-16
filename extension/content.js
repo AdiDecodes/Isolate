@@ -243,7 +243,14 @@
     updateAiStatus("cached", 0);
 
     const fetchStem = async (file) => {
-      const res = await fetch(`${SERVER}/stems/${videoId}/${file}`);
+      // Attach the token when present: blocked accounts are rejected here
+      // instead of silently riding the anonymous path.
+      const headers = {};
+      try {
+        const t = (await chrome.storage.local.get("token")).token;
+        if (t) headers.Authorization = "Bearer " + t;
+      } catch (e) {}
+      const res = await fetch(`${SERVER}/stems/${videoId}/${file}`, { headers });
       if (!res.ok) throw new Error(`stems unavailable (${res.status})`);
       const total = Number(res.headers.get("Content-Length")) || 0;
       const reader = res.body.getReader();

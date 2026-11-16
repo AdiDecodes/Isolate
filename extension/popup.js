@@ -147,6 +147,13 @@
       });
       if (res.ok) me = await res.json();
       else if (res.status === 401) await chrome.storage.local.remove("token");
+      else if (res.status === 403)
+        me = {
+          email: "Account blocked",
+          blocked: true,
+          limits: { dailyAudioMinutes: 0 },
+          usage: { audioSeconds: 0 },
+        };
     } catch (e) {}
     if (!me) {
       $("acctOut").classList.remove("hidden");
@@ -159,15 +166,20 @@
     $("signin").classList.add("hidden");
     $("acctIn").classList.remove("hidden");
     $("signout").classList.remove("hidden");
-    $("acctEmail").textContent = me.enabled === false ? "Account disabled" : me.email;
-    const minsLeft = Math.max(
-      0,
-      Math.round(me.limits.dailyAudioMinutes - me.usage.audioSeconds / 60)
-    );
-    $("acctUsageIn").textContent =
-      me.enabled === false
-        ? "Contact support"
-        : `${minsLeft} of ${me.limits.dailyAudioMinutes} min left today`;
+    $("acctEmail").textContent = me.blocked
+      ? "Account blocked"
+      : me.enabled === false
+        ? "Account disabled"
+        : me.email;
+    const minsLeft = me.blocked
+      ? null
+      : Math.max(
+          0,
+          Math.round(me.limits.dailyAudioMinutes - me.usage.audioSeconds / 60)
+        );
+    $("acctUsageIn").textContent = me.blocked
+      ? "—"
+      : `${minsLeft} of ${me.limits.dailyAudioMinutes} min left today`;
   }
 
   $("signin").addEventListener("click", async () => {
