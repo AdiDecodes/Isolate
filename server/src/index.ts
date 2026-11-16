@@ -67,6 +67,20 @@ app.get("/me", attachIdentity, ah(me));
 
 /* ---------------- stems ---------------- */
 
+// CORS preflight for content-script stem fetches: the Bearer header makes
+// browsers send OPTIONS, which must echo the allowed headers back.
+app.use(["/stems", "/cached"], (req, res, next) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") {
+    res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization");
+    res.set("Access-Control-Max-Age", "86400");
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // Cheap probe: does the server have separated stems for this video?
 app.get("/cached/:id", stemsLimiter, attachIdentity, (req, res) => {
   const id = String(req.params.id || "");

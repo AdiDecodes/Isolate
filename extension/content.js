@@ -14,6 +14,7 @@
   let cacheState = "idle"; // idle | pending | cached | miss
   let pendingAfterProbe = null;
   let stemFetch = null; // { videoId } while the direct fetch runs
+  let stemFetchFailed = false; // stop retry loops; use the offscreen path
   let songCached = false;
   let lastIsMusic = false;
 
@@ -212,7 +213,7 @@
 
     // Cached songs: fetch the stems directly in this tab and hand the raw
     // binary to the page engine — no extension-messaging JSON relay.
-    if (cacheState === "cached") {
+    if (cacheState === "cached" && !stemFetchFailed) {
       lastRequestedVideoId = videoId;
       startStemsFetch(videoId);
       return;
@@ -290,7 +291,9 @@
       } catch (e) {
         if (!stemFetch || stemFetch.videoId !== videoId) return;
         stemFetch = null;
-        // Direct path failed — fall back to the offscreen pipeline.
+        // Direct path failed — fall back to the offscreen pipeline and stop
+        // retrying the direct fetch for this video.
+        stemFetchFailed = true;
         lastRequestedVideoId = null;
         requestIfNeeded(true);
       }
@@ -308,6 +311,7 @@
       cacheState = "idle";
       pendingAfterProbe = null;
       stemFetch = null;
+      stemFetchFailed = false;
       songCached = false;
       aiStatus = { stage: null, pct: null, sec: null, message: null };
       pushAiState();
