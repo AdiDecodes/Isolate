@@ -42,8 +42,21 @@ async function runJob(videoId) {
   const job = currentJob;
 
   try {
+    // 1) Local IndexedDB cache: play straight from the browser, no server.
+    const local = await idbGet(videoId);
+    if (local && local.vocals && local.bgm) {
+      // Touch for LRU (fire-and-forget; never blocks playback).
+      idbPut(videoId, { vocals: local.vocals, bgm: local.bgm, ts: Date.now() });
+      await deliverCached(job, videoId, [local.vocals, local.bgm]);
+      if (!job.cancelled) {
+        report(videoId, { type: "ai-progress", stage: "done", pct: 100 });
+      }
+      return;
+    }
+    // 2) Server stem cache: small AAC files, kept locally after this fetch.
     const cached = await fetchCachedStems(videoId);
     if (cached) {
+      await idbPut(videoId, { vocals: cached[0], bgm: cached[1], ts: Date.now() });
       await deliverCached(job, videoId, cached);
       if (!job.cancelled) {
         report(videoId, { type: "ai-progress", stage: "done", pct: 100 });
@@ -100,9 +113,11 @@ async function fetchCachedStems(videoId) {
 async function deliverCached(job, videoId, [vBuf, bBuf]) {
   report(videoId, { type: "ai-progress", stage: "decoding", pct: null });
   const ctx = new OfflineAudioContext(2, 1, SR);
+  // decodeAudioData detaches its input — decode copies so the buffers stay
+  // usable (they may be the ones stored in the local cache).
   const [vocals, bgm] = await Promise.all([
-    ctx.decodeAudioData(vBuf),
-    ctx.decodeAudioData(bBuf),
+    ctx.decodeAudioData(vBuf.slice(0)),
+    ctx.decodeAudioData(bBuf.slice(0)),
   ]);
   if (job.cancelled || currentJob !== job) return;
 
@@ -223,4 +238,80 @@ function concatBytes(a, b) {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+/* ---------------- local stem cache (IndexedDB) ---------------- */
+
+// Keeps the downloaded AAC stems per videoId so repeat plays never touch the
+// server. Persists across browser restarts; evicts the oldest songs past a
+// cap. Any failure here is non-fatal — playback falls back to the server.
+const IDB_NAME = "isolate-stems";
+const IDB_STORE = "songs";
+const IDB_MAX_SONGS = 50;
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE).createIndex("ts", "ts");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbRun(mode, fn) {
+  return idbOpen().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, mode);
+        const result = fn(tx.objectStore(IDB_STORE));
+        tx.oncomplete = () => resolve(result && result.result !== undefined ? result.result : null);
+        tx.onerror = () => reject(tx.error);
+      })
+  );
+}
+
+async function idbGet(videoId) {
+  try {
+    return await idbRun("readonly", (store) => store.get(videoId));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function idbPut(videoId, record) {
+  try {
+    await idbRun("readwrite", (store) => store.put(record, videoId));
+    await idbEvict();
+  } catch (e) {}
+}
+
+// Keep only the newest IDB_MAX_SONGS songs (by last-used timestamp).
+async function idbEvict() {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      const countReq = store.count();
+      countReq.onsuccess = () => {
+        let excess = countReq.result - IDB_MAX_SONGS;
+        if (excess <= 0) return;
+        const cursorReq = store.index("ts").openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor || excess <= 0) return;
+          cursor.delete();
+          excess--;
+          cursor.continue();
+        };
+      };
+      tx.oncomplete = resolve;
+      tx.onerror = () => resolve();
+    });
+  } catch (e) {}
 }
