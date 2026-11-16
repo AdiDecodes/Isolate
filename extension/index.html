@@ -98,6 +98,38 @@
   }
   #sepNow:hover { filter: brightness(1.1); }
   #sepNow.hidden { display: none; }
+
+  #account {
+    margin: 0 12px 12px;
+    padding: 9px 10px;
+    background: var(--card);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #account .acct-main { flex: 1; min-width: 0; }
+  #acctEmail {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #acctUsage { font-size: 11px; color: var(--dim); }
+  #account button {
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: none;
+  }
+  #account button.ghost { background: transparent; color: var(--dim); }
+  #account button:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
@@ -152,6 +184,19 @@
       <div class="bar hidden" id="bar"><div id="fill"></div></div>
     </div>
     <div id="errtext" class="hidden"></div>
+  </div>
+
+  <div id="account">
+    <div id="acctOut" class="acct-main">
+      <div id="acctUsage">Sign in with Google for more daily usage</div>
+    </div>
+    <button id="signin">Sign in</button>
+
+    <div id="acctIn" class="acct-main hidden">
+      <div id="acctEmail"></div>
+      <div id="acctUsageIn"></div>
+    </div>
+    <button id="signout" class="ghost hidden">Sign out</button>
   </div>
 
   <script src="popup.js"></script>

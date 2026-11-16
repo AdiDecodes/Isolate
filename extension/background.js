@@ -14,7 +14,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       reportError(msg.videoId, String(e && e.message ? e.message : e))
     );
     sendResponse({ ok: true });
-  } else if (msg.type === "ai-progress" || msg.type === "ai-segment" || msg.type === "ai-error") {
+  } else if (
+    msg.type === "ai-progress" ||
+    msg.type === "ai-segment" ||
+    msg.type === "ai-ready" ||
+    msg.type === "ai-error"
+  ) {
     if (msg.type === "ai-error") console.error("[isolate] job error:", msg.message);
     routeToTab(msg);
     sendResponse({ ok: true });
@@ -72,11 +77,17 @@ async function handleRequest(videoId, tabId, start) {
 
   await ensureOffscreen();
 
+  let token = null;
+  try {
+    token = (await chrome.storage.local.get("token")).token || null;
+  } catch (e) {}
+
   jobs.set(videoId, { tabId, stage: "processing", ts: Date.now() });
   chrome.runtime.sendMessage({
     type: "ai-process",
     videoId,
     tabId,
     start,
+    token,
   });
 }

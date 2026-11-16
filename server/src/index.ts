@@ -1,17 +1,63 @@
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { config, segmentFrames } from "./config.js";
 import { segmentFrame, doneFrame } from "./pcm.js";
 import { createEngine } from "./engine.js";
 import { resolveAudio, spawnFfmpegPcm, spawnFfmpegMp3, isValidVideoId } from "./ytdlp.js";
 import * as cache from "./cache.js";
+import { attachIdentity, authPage, googleStart, googleCallback, authPoll, logout, me } from "./auth.js";
+import * as usage from "./usage.js";
 
 const app = express();
+// Behind a reverse proxy (duckdns + caddy/nginx): trust one hop so req.ip is
+// the real client for anonymous identity and per-IP rate limits.
+app.set("trust proxy", 1);
+
+// Express 4 does not catch async handler errors — route them to the error
+// middleware so failures (e.g. Mongo down) become JSON 500s, not resets.
+const ah =
+  (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
+
+const separateLimiter = rateLimit({
+  windowMs: config.rateLimitSeparate.windowMs,
+  max: config.rateLimitSeparate.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests — slow down", code: "rate_limited" },
+});
+const stemsLimiter = rateLimit({
+  windowMs: config.rateLimitStems.windowMs,
+  max: config.rateLimitStems.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests — slow down", code: "rate_limited" },
+});
+const authPollLimiter = rateLimit({
+  windowMs: config.rateLimitAuthPoll.windowMs,
+  max: config.rateLimitAuthPoll.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, model: config.spaceModel });
 });
 
-app.get("/stems/:id/:file", (req, res) => {
+/* ---------------- auth ---------------- */
+
+app.get("/auth", authPage);
+app.get("/auth/google", googleStart);
+app.get("/auth/google/callback", ah(googleCallback));
+app.get("/auth/poll", authPollLimiter, ah(authPoll));
+app.post("/auth/logout", attachIdentity, ah(logout));
+app.get("/me", attachIdentity, ah(me));
+
+/* ---------------- stems ---------------- */
+
+app.get("/stems/:id/:file", stemsLimiter, (req, res) => {
   const id = String(req.params.id || "");
   const m = /^(vocals|bgm)\.m4a$/.exec(String(req.params.file || ""));
   if (!isValidVideoId(id) || !m) {
@@ -23,14 +69,15 @@ app.get("/stems/:id/:file", (req, res) => {
     return;
   }
   const file = m[1] === "vocals" ? cache.vocalsFile(id) : cache.bgmFile(id);
-  res.sendFile(file, { headers: { "Cache-Control": "no-store" } }, (err) => {
+  // Stems are deterministic per videoId, so the browser can keep them.
+  res.sendFile(file, { headers: { "Cache-Control": "public, max-age=604800, immutable" } }, (err) => {
     if (err && !res.headersSent) {
       res.status(500).json({ error: "stem read failed" });
     }
   });
 });
 
-app.get("/separate", async (req, res) => {
+app.get("/separate", separateLimiter, attachIdentity, ah(async (req, res) => {
   const videoId = String(req.query.id || "");
   if (!isValidVideoId(videoId)) {
     res.status(400).json({ error: "invalid video id" });
@@ -42,6 +89,19 @@ app.get("/separate", async (req, res) => {
     streamCachedSeparation(req, res, videoId);
     return;
   }
+
+  // Cost layer: reserve a separation slot before any expensive work. Audio
+  // minutes are reserved separately once the duration is known.
+  const identity = res.locals.identity!;
+  if (!(await usage.reserveSeparation(identity, res))) return;
+  let slotHeld = true;
+  const releaseSlot = () => {
+    if (slotHeld) {
+      slotHeld = false;
+      usage.releaseSeparation(identity);
+    }
+  };
+  req.on("close", releaseSlot);
 
   const startAt = Math.max(0, Number(req.query.start) || 0);
   const endReq = Number(req.query.end) || 0;
@@ -55,8 +115,10 @@ app.get("/separate", async (req, res) => {
     duration = resolved.duration;
     from = Math.min(startAt, Math.max(0, duration - config.segmentSeconds));
     to = endReq > from ? Math.min(endReq, duration) : duration;
+    if (!(await usage.reserveAudioSeconds(identity, to - from, res))) return;
     proc = spawnFfmpegPcm(resolved.url, from, to);
   } catch (e) {
+    releaseSlot();
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     return;
   }
@@ -98,6 +160,7 @@ app.get("/separate", async (req, res) => {
   engine.setEstimate(span > 0 ? Math.ceil((span * config.sampleRate) / segmentFrames) : 0);
 
   const fail = (e: unknown) => {
+    releaseSlot();
     if (cancelled || res.writableEnded) return;
     const body = Buffer.from(String(e instanceof Error ? e.message : e));
     const header = Buffer.alloc(12);
@@ -174,9 +237,9 @@ app.get("/separate", async (req, res) => {
     finishStream().catch(fail);
   });
   proc.on("error", (e) => fail(new Error(`ffmpeg failed: ${e.message}`)));
-});
+}));
 
-app.get("/mp3", async (req, res) => {
+app.get("/mp3", separateLimiter, async (req, res) => {
   const videoId = String(req.query.id || "");
   if (!isValidVideoId(videoId)) {
     res.status(400).json({ error: "invalid video id" });
@@ -350,6 +413,22 @@ function pcmToFloat(pcm: Buffer): [Float32Array, Float32Array] {
   }
   return [l, r];
 }
+
+app.use(
+  (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error("[isolate] unhandled error:", err instanceof Error ? err.message : err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error", code: "internal" });
+    } else {
+      res.end();
+    }
+  }
+);
 
 app.listen(config.port, "127.0.0.1", () => {
   console.log(`isolate server on http://127.0.0.1:${config.port}`);

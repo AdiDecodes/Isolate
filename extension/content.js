@@ -94,6 +94,11 @@
     } else if (msg.type === "ai-segment") {
       const { type, ...rest } = msg;
       post({ kind: "ai-segment", ...rest });
+    } else if (msg.type === "ai-ready") {
+      // Enough cached stems are relayed to start playback; the job keeps
+      // finishing in the background.
+      lastRequestedVideoId = msg.videoId;
+      post({ kind: "ai-ready" });
     } else if (msg.type === "ai-error") {
       lastRequestedVideoId = null;
       aiStatus = { stage: "error", pct: null, sec: null, message: msg.message };

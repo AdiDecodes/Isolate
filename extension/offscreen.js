@@ -11,9 +11,15 @@ const MAGIC_ERR = 0x4552524f;
 const MAGIC_DONE = 0x444f4e45;
 
 let currentJob = null;
+let authToken = null;
+
+function authHeaders() {
+  return authToken ? { Authorization: "Bearer " + authToken } : {};
+}
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "ai-process") {
+    authToken = msg.token || null;
     runJob(msg.videoId).catch((e) => {
       chrome.runtime.sendMessage({
         type: "ai-error",
@@ -46,7 +52,9 @@ async function runJob(videoId) {
     }
     let api;
     try {
-      api = await fetch(API_ROOT + "/separate?id=" + encodeURIComponent(videoId));
+      api = await fetch(API_ROOT + "/separate?id=" + encodeURIComponent(videoId), {
+        headers: authHeaders(),
+      });
     } catch (e) {
       console.error("[isolate] separate fetch failed:", e);
       throw new Error(
@@ -79,8 +87,8 @@ async function runJob(videoId) {
 async function fetchCachedStems(videoId) {
   try {
     const [vRes, bRes] = await Promise.all([
-      fetch(API_ROOT + "/stems/" + videoId + "/vocals.m4a"),
-      fetch(API_ROOT + "/stems/" + videoId + "/bgm.m4a"),
+      fetch(API_ROOT + "/stems/" + videoId + "/vocals.m4a", { headers: authHeaders() }),
+      fetch(API_ROOT + "/stems/" + videoId + "/bgm.m4a", { headers: authHeaders() }),
     ]);
     if (!vRes.ok || !bRes.ok) return null;
     return [await vRes.arrayBuffer(), await bRes.arrayBuffer()];
@@ -100,6 +108,10 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
 
   const frames = Math.min(vocals.length, bgm.length);
   const segFrames = 10 * SR;
+  // Playback can start once this much audio has been handed to the tab; the
+  // rest keeps arriving while the video plays.
+  const readyAt = Math.min(frames, 30 * SR);
+  let readySent = false;
   const vL = vocals.getChannelData(0);
   const vR = vocals.getChannelData(1);
   const bL = bgm.getChannelData(0);
@@ -116,6 +128,10 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
       bgmL: bL.slice(s, e),
       bgmR: bR.slice(s, e),
     });
+    if (!readySent && e >= readyAt) {
+      readySent = true;
+      report(videoId, { type: "ai-ready" });
+    }
     report(videoId, {
       type: "ai-progress",
       stage: "cached",

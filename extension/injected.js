@@ -114,14 +114,19 @@
     stopStems();
     if (!ctx || ctx.state !== "running" || video.paused) return;
     const sr = ai.segments[0]?.sr || 44100;
-    const nowFrame = video.currentTime * sr;
-    if (!stemsCover(nowFrame)) return;
+    const rate = video.playbackRate || 1;
+    // Anchor to where the video will be when the first source actually
+    // starts, otherwise stems lag the video by the scheduling delay.
+    const startDelay = 0.06;
+    const startWhen = ctx.currentTime + startDelay;
+    const startFrame = Math.round(video.currentTime * sr + startDelay * rate * sr);
+    if (!stemsCover(startFrame)) return;
 
     ai.sched = {
-      untilFrame: nowFrame,
-      nextWhen: ctx.currentTime + 0.06,
-      anchorFrame: nowFrame,
-      anchorWhen: ctx.currentTime + 0.06,
+      untilFrame: startFrame,
+      nextWhen: startWhen,
+      anchorFrame: startFrame,
+      anchorWhen: startWhen,
     };
     ai.sources = [];
     scheduleAhead(video);
@@ -254,6 +259,12 @@
     video.addEventListener("seeking", onDisturb);
     video.addEventListener("ratechange", onDisturb);
     video.addEventListener("play", onDisturb);
+    video.addEventListener("playing", onDisturb);
+    // While the video stalls, its clock freezes but already-scheduled
+    // sources keep playing; drop them and resync when playback resumes.
+    video.addEventListener("waiting", () => {
+      if (ai.enabled && mode !== "whole") stopStems();
+    });
     video.addEventListener("pause", () => {
       stopStems();
       useStems(false);
@@ -300,11 +311,31 @@
     } else if (d.kind === "ai-done") {
       ai.waiting = false;
       const video = getVideo();
-      if (video && ai.enabled) {
+      // Only start from 0 if nothing is playing yet (e.g. the parked video
+      // after a full separation); never rewind a video already underway.
+      if (
+        video &&
+        ai.enabled &&
+        !ai.sources.length &&
+        video.paused &&
+        video.currentTime < 0.1
+      ) {
         try {
           video.currentTime = 0;
           video.play().catch(() => {});
         } catch (e) {}
+      }
+    } else if (d.kind === "ai-ready") {
+      // Cached path: enough stems are buffered to start from 0 now.
+      if (ai.waiting) {
+        ai.waiting = false;
+        const video = getVideo();
+        if (video && ai.enabled) {
+          try {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } catch (e) {}
+        }
       }
     } else if (d.kind === "ai-segment") {
       ai.segments.push({

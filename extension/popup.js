@@ -120,6 +120,97 @@
     setTimeout(refresh, 1200);
   });
 
+  /* ---------------- account ---------------- */
+
+  const SERVER = "https://isolate443.duckdns.org";
+  let signingIn = false;
+
+  function getToken() {
+    return chrome.storage.local.get("token").then((d) => d.token || null);
+  }
+
+  async function refreshAccount() {
+    const token = await getToken();
+    if (!token) {
+      $("acctOut").classList.remove("hidden");
+      $("acctIn").classList.add("hidden");
+      $("signin").classList.remove("hidden");
+      $("signout").classList.add("hidden");
+      return;
+    }
+    let me = null;
+    try {
+      const res = await fetch(SERVER + "/me", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (res.ok) me = await res.json();
+      else if (res.status === 401) await chrome.storage.local.remove("token");
+    } catch (e) {}
+    if (!me) {
+      $("acctOut").classList.remove("hidden");
+      $("acctIn").classList.add("hidden");
+      $("signin").classList.remove("hidden");
+      $("signout").classList.add("hidden");
+      return;
+    }
+    $("acctOut").classList.add("hidden");
+    $("signin").classList.add("hidden");
+    $("acctIn").classList.remove("hidden");
+    $("signout").classList.remove("hidden");
+    $("acctEmail").textContent = me.enabled === false ? "Account disabled" : me.email;
+    const minsLeft = Math.max(
+      0,
+      Math.round(me.limits.dailyAudioMinutes - me.usage.audioSeconds / 60)
+    );
+    $("acctUsageIn").textContent =
+      me.enabled === false
+        ? "Contact support"
+        : `${minsLeft} of ${me.limits.dailyAudioMinutes} min left today`;
+  }
+
+  $("signin").addEventListener("click", async () => {
+    if (signingIn) return;
+    signingIn = true;
+    const btn = $("signin");
+    btn.disabled = true;
+    btn.textContent = "Waiting…";
+    try {
+      const code = crypto.randomUUID();
+      await chrome.tabs.create({
+        url: SERVER + "/auth?code=" + encodeURIComponent(code),
+      });
+      // Poll until the login tab completes or ~2 minutes pass.
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const res = await fetch(SERVER + "/auth/poll?code=" + encodeURIComponent(code));
+        const data = await res.json();
+        if (data.status === "ok" && data.token) {
+          await chrome.storage.local.set({ token: data.token });
+          break;
+        }
+      }
+    } catch (e) {}
+    signingIn = false;
+    btn.disabled = false;
+    btn.textContent = "Sign in";
+    await refreshAccount();
+  });
+
+  $("signout").addEventListener("click", async () => {
+    const token = await getToken();
+    if (token) {
+      try {
+        await fetch(SERVER + "/auth/logout", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token },
+        });
+      } catch (e) {}
+    }
+    await chrome.storage.local.remove("token");
+    await refreshAccount();
+  });
+
   setInterval(refresh, 600);
   refresh();
+  refreshAccount();
 })();
