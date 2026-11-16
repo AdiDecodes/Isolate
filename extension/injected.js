@@ -49,6 +49,50 @@
   document.addEventListener("pointerdown", ensureAudio, true);
   document.addEventListener("keydown", ensureAudio, true);
 
+  /* ---------------- video-id sniffer ---------------- */
+
+  // YT Music doesn't always update the URL (e.g. collapsed player bar), and
+  // its DOM changes constantly. The player fetches /youtubei/v1/player for
+  // every track — capture the videoId from those responses.
+  let sniffedVideoId = null;
+  function noteVideoId(id) {
+    if (typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)) {
+      sniffedVideoId = id;
+    }
+  }
+  const origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = function (...args) {
+      const res = origFetch.apply(this, args);
+      try {
+        const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
+        if (url && String(url).includes("/youtubei/v1/player")) {
+          Promise.resolve(res)
+            .then((r) => r.clone().json())
+            .then((j) => noteVideoId(j && j.videoDetails && j.videoDetails.videoId))
+            .catch(() => {});
+        }
+      } catch (e) {}
+      return res;
+    };
+  }
+  const origXhrOpen = XMLHttpRequest.prototype.open;
+  const origXhrSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this.__ccUrl = String(url || "");
+    return origXhrOpen.call(this, method, url, ...rest);
+  };
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener("load", () => {
+      try {
+        if (this.__ccUrl && this.__ccUrl.includes("/youtubei/v1/player")) {
+          noteVideoId(JSON.parse(this.responseText).videoDetails.videoId);
+        }
+      } catch (e) {}
+    });
+    return origXhrSend.apply(this, args);
+  };
+
   /* ---------------- AI stems ---------------- */
 
   const ai = {
@@ -417,12 +461,14 @@
   setInterval(hookVideos, 2000);
 
   function currentVideoIdMain() {
-    // URL first (watch pages). YT Music also plays from home/explore pages
-    // where the URL carries no ?v= — read it from the player instead.
+    // 1) URL (watch pages). 2) sniffed from the player's /player responses —
+    // works even when YT Music's URL and DOM stay unchanged. 3) player API.
+    // 4) player-bar title link.
     try {
       const u = new URLSearchParams(location.search).get("v");
       if (u) return u;
     } catch (e) {}
+    if (sniffedVideoId) return sniffedVideoId;
     try {
       const player = document.querySelector("ytmusic-player, #movie_player");
       if (player && typeof player.getPlayerResponse === "function") {
