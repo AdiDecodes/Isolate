@@ -53,7 +53,7 @@
 
   // YT Music doesn't always update the URL (e.g. collapsed player bar), and
   // its DOM changes constantly. The player fetches /youtubei/v1/player for
-  // every track — capture the videoId from those responses.
+  // every track - capture the videoId from those responses.
   let sniffedVideoId = null;
   function noteVideoId(id) {
     if (typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)) {
@@ -285,7 +285,7 @@
     }
 
     if (!stemsCover(sched.untilFrame)) {
-      // ran to the edge of ready stems — fall back until more arrive
+      // ran to the edge of ready stems - fall back until more arrive
       stopStems();
       useStems(false);
       return;
@@ -432,7 +432,7 @@
       })();
     } else if (d.kind === "ai-segment") {
       // Malformed segments (e.g. arrays flattened to objects by extension
-      // messaging) would poison coverage math with NaN frames — drop them.
+      // messaging) would poison coverage math with NaN frames - drop them.
       if (!d.vocalsL || !d.vocalsL.length) return;
       ai.segments.push({
         startFrame: d.startFrame,
@@ -461,7 +461,7 @@
   setInterval(hookVideos, 2000);
 
   function currentVideoIdMain() {
-    // 1) URL (watch pages). 2) sniffed from the player's /player responses —
+    // 1) URL (watch pages). 2) sniffed from the player's /player responses -
     // works even when YT Music's URL and DOM stay unchanged. 3) player API.
     // 4) player-bar title link.
     try {

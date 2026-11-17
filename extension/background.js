@@ -29,7 +29,7 @@ async function pollAuth(code) {
   console.log("[isolate] auth: polling", code.slice(0, 8) + "…");
   const deadline = Date.now() + 10 * 60 * 1000;
   // MV3 kills the service worker after ~30s of inactivity, and a timer
-  // sleep doesn't count as activity — ping an extension API so the poll
+  // sleep doesn't count as activity - ping an extension API so the poll
   // loop survives the whole sign-in window.
   const keepAlive = setInterval(
     () => chrome.runtime.getPlatformInfo(() => {}),
@@ -154,7 +154,7 @@ async function handleRequest(videoId, tabId, start) {
   if (jobActive(jobs.get(videoId))) return;
 
   const cached = await isCached(videoId);
-  // Cached songs skip straight to stem fetch — no "Resolving stream…" stage.
+  // Cached songs skip straight to stem fetch - no "Resolving stream…" stage.
   jobs.set(videoId, { tabId, stage: cached ? "processing" : "extracting", ts: Date.now() });
   if (!cached) routeToTab({ type: "ai-progress", videoId, stage: "extracting" });
 

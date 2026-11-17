@@ -17,14 +17,14 @@
   function stageText(s) {
     switch (s.stage) {
       case "requested": return "Requested…";
-      case "standby": return "Ready — press Separate now";
+      case "standby": return "Ready - press Separate now";
       case "blocked": return s.message || "Skipped";
       case "extracting": return s.label || "Resolving stream…";
       case "downloading": return s.pct != null ? `Audio ${s.pct}%` : "Downloading audio…";
       case "uploading": return s.pct != null ? `Uploading ${s.pct}%` : "Uploading…";
       case "cloud": return s.sec != null ? `Separating… ${s.sec}s` : "Separating…";
       case "decoding": return "Decoding…";
-      case "cached-ready": return "Song cached — stems ready";
+      case "cached-ready": return "Song cached - stems ready";
       case "cached": return s.pct != null ? `Cached stems ${s.pct}%` : "Loading cached stems…";
       case "separating": return s.pct != null ? `Stems ${s.pct}%` : "Delivering stems…";
       default: return s.stage;
@@ -67,9 +67,10 @@
     lastState = state;
     $("aiBtn").classList.toggle("active", !!state.aiEnabled);
     $("autoBtn").classList.toggle("active", state.autoSeparate !== false);
+    const blocked = (state.status || {}).stage === "blocked";
     $("sepNow").classList.toggle(
       "hidden",
-      !(state.aiEnabled && state.autoSeparate === false)
+      !(state.aiEnabled && (state.autoSeparate === false || blocked))
     );
 
     const s = state.status || {};
@@ -141,7 +142,7 @@
       $("acctIn").classList.add("hidden");
       $("signin").classList.remove("hidden");
       $("signout").classList.add("hidden");
-      // The sign-in may have completed while the service worker was dead —
+      // The sign-in may have completed while the service worker was dead -
       // nudge it to resume polling the parked token.
       const { authPendingCode } = await chrome.storage.local
         .get("authPendingCode")
@@ -192,7 +193,7 @@
           Math.round(me.limits.dailyAudioMinutes - me.usage.audioSeconds / 60)
         );
     $("acctUsageIn").textContent = me.blocked
-      ? "—"
+      ? "-"
       : `${minsLeft} of ${me.limits.dailyAudioMinutes} min left today`;
   }
 

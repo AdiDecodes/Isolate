@@ -78,7 +78,7 @@
       metaVideoId = e.data.videoId || null;
       lastIsMusic = !!e.data.isMusic;
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
-      // Meta may arrive after the cache probe — retry the autofetch then.
+      // Meta may arrive after the cache probe - retry the autofetch then.
       if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
     } else if (e.data.kind === "ai-stems-done") {
       // Direct fetch path: the page engine decoded and segmented both stems.
@@ -91,7 +91,7 @@
       post({ kind: "ai-done" });
     } else if (e.data.kind === "ai-stems-failed") {
       stemFetch = null;
-      // Direct path broke (e.g. decode) — fall back to the offscreen pipeline.
+      // Direct path broke (e.g. decode) - fall back to the offscreen pipeline.
       lastRequestedVideoId = null;
       if (aiEnabled) requestIfNeeded(true);
     }
@@ -182,7 +182,7 @@
   }
 
   function currentVideoId() {
-    // Watch pages have ?v=; YT Music inline playback doesn't — fall back to
+    // Watch pages have ?v=; YT Music inline playback doesn't - fall back to
     // the videoId the page engine reads from the player.
     try {
       const v = new URLSearchParams(location.search).get("v");
@@ -198,14 +198,21 @@
 
     const video = document.querySelector("video");
     const duration = video && isFinite(video.duration) ? video.duration : null;
-    if (!lastIsMusic) {
-      aiStatus = { stage: "blocked", pct: null, sec: null, message: "Not a music video — skipped" };
+    if (!lastIsMusic && !force) {
+      // Category metadata misses plenty of real music videos, so this is
+      // only a guard for the auto path; Separate now overrides it.
+      aiStatus = {
+        stage: "blocked",
+        pct: null,
+        sec: null,
+        message: "Not flagged as music. Use Separate now to force.",
+      };
       updateAiStatus("blocked", null, aiStatus.message);
       return;
     }
-    if (duration == null) return; // metadata not loaded yet — retry on the next tick
+    if (duration == null) return; // metadata not loaded yet - retry on the next tick
     if (duration > 600) {
-      aiStatus = { stage: "blocked", pct: null, sec: null, message: "Longer than 10 min — skipped" };
+      aiStatus = { stage: "blocked", pct: null, sec: null, message: "Skipped: longer than 10 min" };
       updateAiStatus("blocked", null, aiStatus.message);
       return;
     }
@@ -216,7 +223,7 @@
     }
 
     // Cached songs: fetch the stems directly in this tab and hand the raw
-    // binary to the page engine — no extension-messaging JSON relay.
+    // binary to the page engine - no extension-messaging JSON relay.
     if (cacheState === "cached" && !stemFetchFailed) {
       lastRequestedVideoId = videoId;
       startStemsFetch(videoId);
@@ -295,7 +302,7 @@
       } catch (e) {
         if (!stemFetch || stemFetch.videoId !== videoId) return;
         stemFetch = null;
-        // Direct path failed — fall back to the offscreen pipeline and stop
+        // Direct path failed - fall back to the offscreen pipeline and stop
         // retrying the direct fetch for this video.
         stemFetchFailed = true;
         lastRequestedVideoId = null;
@@ -321,7 +328,7 @@
       pushAiState();
     }
     // Passive probe: is this song already separated on the server? Cached
-    // songs light the FAB green and take the fast direct-fetch path below —
+    // songs light the FAB green and take the fast direct-fetch path below -
     // bulk audio must NOT go through chrome.runtime messaging (JSON hop).
     if (videoId && videoId !== lastCacheCheck) {
       lastCacheCheck = videoId;
@@ -357,7 +364,7 @@
     requestIfNeeded(force);
   }
 
-  // Only surface the cached hint when nothing else is going on — never
+  // Only surface the cached hint when nothing else is going on - never
   // overwrite an in-flight job, error, or done state.
   function indicateCached() {
     const idle =
@@ -391,7 +398,7 @@
 
   // Anchors for the topbar right-hand cluster, tried in order: the Create
   // button first, then the avatar/settings buttons. Container ids are the
-  // last resort — they differ between YouTube and YT Music layouts.
+  // last resort - they differ between YouTube and YT Music layouts.
   const TOPBAR_ANCHORS = [
     "#create-button",
     "ytd-button-renderer#upload-button",
@@ -424,7 +431,7 @@
         : null;
 
     // Already sitting exactly where we want it (right before the anchor, or
-    // at the end of the cluster) — leave it alone. Otherwise re-place it:
+    // at the end of the cluster) - leave it alone. Otherwise re-place it:
     // this is what rescues the button out of the body-fallback bubble once
     // the masthead renders.
     if (btn && btn.isConnected) {
@@ -515,7 +522,7 @@
   }
 
   function updateAiStatus(stage, pct, message, sec) {
-    // Ring state only — details live in the popup.
+    // Ring state only - details live in the popup.
     updateRing(stage, pct);
   }
 

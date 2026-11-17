@@ -113,7 +113,7 @@ async function fetchCachedStems(videoId) {
 async function deliverCached(job, videoId, [vBuf, bBuf]) {
   report(videoId, { type: "ai-progress", stage: "decoding", pct: null });
   const ctx = new OfflineAudioContext(2, 1, SR);
-  // decodeAudioData detaches its input — decode copies so the buffers stay
+  // decodeAudioData detaches its input - decode copies so the buffers stay
   // usable (they may be the ones stored in the local cache).
   const [vocals, bgm] = await Promise.all([
     ctx.decodeAudioData(vBuf.slice(0)),
@@ -158,7 +158,7 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
 }
 
 // Collect segments for the whole track and deliver them only once the
-// separation is complete — playback resumes in sync afterwards.
+// separation is complete - playback resumes in sync afterwards.
 async function readFrames(job, videoId, res) {
   const reader = res.body.getReader();
   let buf = new Uint8Array(0);
@@ -244,7 +244,7 @@ function concatBytes(a, b) {
 
 // Keeps the downloaded AAC stems per videoId so repeat plays never touch the
 // server. Persists across browser restarts; evicts the oldest songs past a
-// cap. Any failure here is non-fatal — playback falls back to the server.
+// cap. Any failure here is non-fatal - playback falls back to the server.
 const IDB_NAME = "isolate-stems";
 const IDB_STORE = "songs";
 const IDB_MAX_SONGS = 50;
