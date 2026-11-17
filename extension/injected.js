@@ -1,10 +1,6 @@
 (() => {
   "use strict";
 
-  // Runs in the page's MAIN world. Owns AI stem playback (cloud Demucs),
-  // synced to the video element. No local separation: until stems cover the
-  // current position, the video's native audio plays untouched.
-
   const MSG = "cc-isolate";
   const MODES = ["vocals", "whole", "bgm"];
   const GRANULE_SECONDS = 0.5;
@@ -27,16 +23,12 @@
         attachVideoEvents(video);
         videos.add(video);
         if (stemsActive) useStems(true);
-      } catch (e) {
-        /* unexpected */
-      }
+      } catch (e) {}
     }
   }
 
   function ensureAudio() {
     if (!ctx) {
-      // Playback context for AI stem buffers only; the video's own audio
-      // plays natively unless stems take over.
       ctx = new AudioContext({ latencyHint: "playback" });
     }
     if (ctx.state === "suspended") {
@@ -49,11 +41,6 @@
   document.addEventListener("pointerdown", ensureAudio, true);
   document.addEventListener("keydown", ensureAudio, true);
 
-  /* ---------------- video-id sniffer ---------------- */
-
-  // YT Music doesn't always update the URL (e.g. collapsed player bar), and
-  // its DOM changes constantly. The player fetches /youtubei/v1/player for
-  // every track - capture the videoId from those responses.
   let sniffedVideoId = null;
   function noteVideoId(id) {
     if (typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)) {
@@ -93,15 +80,13 @@
     return origXhrSend.apply(this, args);
   };
 
-  /* ---------------- AI stems ---------------- */
-
   const ai = {
     enabled: false,
     videoId: null,
     waiting: false,
-    segments: [], // { startFrame, frames, sr, vocalsL, vocalsR, bgmL, bgmR, vocalsBuf, bgmBuf }
+    segments: [],
     sources: [],
-    sched: null, // { untilFrame, nextWhen, anchorFrame, anchorWhen }
+    sched: null,
   };
 
   function getVideo() {
@@ -128,16 +113,12 @@
     for (const src of ai.sources) {
       try {
         src.stop();
-      } catch (e) {
-        /* already stopped */
-      }
+      } catch (e) {}
     }
     ai.sources = [];
     ai.sched = null;
   }
 
-  // While stems play, the video's native audio is muted; restored exactly
-  // as the user left it when stems stop.
   let stemsActive = false;
   const nativeMuted = new WeakMap();
 
@@ -159,8 +140,6 @@
     if (!ctx || ctx.state !== "running" || video.paused) return;
     const sr = ai.segments[0]?.sr || 44100;
     const rate = video.playbackRate || 1;
-    // Anchor to where the video will be when the first source actually
-    // starts, otherwise stems lag the video by the scheduling delay.
     const startDelay = 0.06;
     const startWhen = ctx.currentTime + startDelay;
     const startFrame = Math.round(video.currentTime * sr + startDelay * rate * sr);
@@ -182,7 +161,6 @@
     const sr = ai.segments[0]?.sr || 44100;
     const rate = video.playbackRate || 1;
 
-    // Skip over any granule time that has already passed.
     const now = ctx.currentTime;
     if (sched.nextWhen < now) {
       const skipped = Math.round((now - sched.nextWhen) * rate * sr);
@@ -194,7 +172,7 @@
 
     while (sched.untilFrame < (video.currentTime + LOOKAHEAD_SECONDS) * sr) {
       const seg = segmentAt(sched.untilFrame);
-      if (!seg) return; // stems not ready this far ahead -> fallback on next tick
+      if (!seg) return;
 
       const segOff = sched.untilFrame - seg.startFrame;
       const granule = Math.min(
@@ -246,7 +224,6 @@
       return;
     }
 
-    // Waiting for full separation: keep the video parked at 0:00.
     if (ai.waiting) {
       if (!video.paused) video.pause();
       if (video.currentTime > 0.05) parkVideo(video);
@@ -274,7 +251,6 @@
       return;
     }
 
-    // drift check
     const rate = video.playbackRate || 1;
     const stemNow = sched.anchorFrame + Math.max(0, ctx.currentTime - sched.anchorWhen) * rate * sr;
     if (Math.abs(stemNow - videoFrame) > DRIFT_LIMIT * sr) {
@@ -285,7 +261,6 @@
     }
 
     if (!stemsCover(sched.untilFrame)) {
-      // ran to the edge of ready stems - fall back until more arrive
       stopStems();
       useStems(false);
       return;
@@ -304,8 +279,6 @@
     video.addEventListener("ratechange", onDisturb);
     video.addEventListener("play", onDisturb);
     video.addEventListener("playing", onDisturb);
-    // While the video stalls, its clock freezes but already-scheduled
-    // sources keep playing; drop them and resync when playback resumes.
     video.addEventListener("waiting", () => {
       if (ai.enabled && mode !== "whole") stopStems();
     });
@@ -324,8 +297,6 @@
     if (video && ai.waiting) parkVideo(video);
     useStems(false);
   }
-
-  /* ---------------- messages from the extension ---------------- */
 
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data || e.data.type !== MSG) return;
@@ -355,8 +326,6 @@
     } else if (d.kind === "ai-done") {
       ai.waiting = false;
       const video = getVideo();
-      // Only start from 0 if nothing is playing yet (e.g. the parked video
-      // after a full separation); never rewind a video already underway.
       if (
         video &&
         ai.enabled &&
@@ -370,7 +339,6 @@
         } catch (e) {}
       }
     } else if (d.kind === "ai-ready") {
-      // Cached path: enough stems are buffered to start from 0 now.
       if (ai.waiting) {
         ai.waiting = false;
         const video = getVideo();
@@ -382,9 +350,6 @@
         }
       }
     } else if (d.kind === "ai-stems") {
-      // Direct path: raw AAC stems handed over as binary (structured clone).
-      // Decode + segment here so no bulk audio ever crosses the extension
-      // messaging boundary.
       const sr = d.sampleRate || 44100;
       (async () => {
         try {
@@ -431,8 +396,6 @@
         }
       })();
     } else if (d.kind === "ai-segment") {
-      // Malformed segments (e.g. arrays flattened to objects by extension
-      // messaging) would poison coverage math with NaN frames - drop them.
       if (!d.vocalsL || !d.vocalsL.length) return;
       ai.segments.push({
         startFrame: d.startFrame,
@@ -461,9 +424,6 @@
   setInterval(hookVideos, 2000);
 
   function currentVideoIdMain() {
-    // 1) URL (watch pages). 2) sniffed from the player's /player responses -
-    // works even when YT Music's URL and DOM stay unchanged. 3) player API.
-    // 4) player-bar title link.
     try {
       const u = new URLSearchParams(location.search).get("v");
       if (u) return u;
@@ -511,7 +471,6 @@
 
   window.postMessage({ type: MSG, kind: "ready" }, window.location.origin);
 
-  // Diagnostics for support/debugging.
   Object.defineProperty(window, "__ccIsolate", {
     value: {
       status: () => {

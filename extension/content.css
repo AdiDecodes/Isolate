@@ -1,4 +1,3 @@
-/* Base: a masthead-style icon button (sits left of the Create button). */
 #cc-isolate-float {
   position: relative;
   z-index: 2147483646;
@@ -27,7 +26,6 @@
   background: var(--yt-spec-20-percent-layer, rgba(127, 127, 127, 0.28));
 }
 
-/* Fallback when the masthead isn't available: keep the floating bubble. */
 body > #cc-isolate-float {
   position: fixed;
   right: 24px;

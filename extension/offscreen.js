@@ -1,7 +1,3 @@
-// Offscreen document: asks the local separation server to extract and
-// separate the video, parses the binary stem frames from its response, and
-// streams finished segments back to the tab via the service worker.
-
 const API_ROOT = "https://isolate443.duckdns.org";
 const SR = 44100;
 
@@ -42,10 +38,8 @@ async function runJob(videoId) {
   const job = currentJob;
 
   try {
-    // 1) Local IndexedDB cache: play straight from the browser, no server.
     const local = await idbGet(videoId);
     if (local && local.vocals && local.bgm) {
-      // Touch for LRU (fire-and-forget; never blocks playback).
       idbPut(videoId, { vocals: local.vocals, bgm: local.bgm, ts: Date.now() });
       await deliverCached(job, videoId, [local.vocals, local.bgm]);
       if (!job.cancelled) {
@@ -53,7 +47,6 @@ async function runJob(videoId) {
       }
       return;
     }
-    // 2) Server stem cache: small AAC files, kept locally after this fetch.
     const cached = await fetchCachedStems(videoId);
     if (cached) {
       await idbPut(videoId, { vocals: cached[0], bgm: cached[1], ts: Date.now() });
@@ -94,9 +87,6 @@ async function runJob(videoId) {
   }
 }
 
-// Cached songs skip the raw-PCM /separate stream entirely: the server hands
-// over the small AAC stems and we decode them locally, which starts playback
-// in a second or two instead of after a ~100 MB transfer.
 async function fetchCachedStems(videoId) {
   try {
     const [vRes, bRes] = await Promise.all([
@@ -113,8 +103,6 @@ async function fetchCachedStems(videoId) {
 async function deliverCached(job, videoId, [vBuf, bBuf]) {
   report(videoId, { type: "ai-progress", stage: "decoding", pct: null });
   const ctx = new OfflineAudioContext(2, 1, SR);
-  // decodeAudioData detaches its input - decode copies so the buffers stay
-  // usable (they may be the ones stored in the local cache).
   const [vocals, bgm] = await Promise.all([
     ctx.decodeAudioData(vBuf.slice(0)),
     ctx.decodeAudioData(bBuf.slice(0)),
@@ -123,8 +111,6 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
 
   const frames = Math.min(vocals.length, bgm.length);
   const segFrames = 10 * SR;
-  // Playback can start once this much audio has been handed to the tab; the
-  // rest keeps arriving while the video plays.
   const readyAt = Math.min(frames, 30 * SR);
   let readySent = false;
   const vL = vocals.getChannelData(0);
@@ -134,8 +120,6 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
   for (let s = 0; s < frames; s += segFrames) {
     if (job.cancelled || currentJob !== job) return;
     const e = Math.min(s + segFrames, frames);
-    // chrome.runtime messaging JSON-serializes: typed arrays would arrive as
-    // plain objects without .length, so send plain arrays (as /separate does).
     report(videoId, {
       type: "ai-segment",
       startFrame: s,
@@ -157,8 +141,6 @@ async function deliverCached(job, videoId, [vBuf, bBuf]) {
   }
 }
 
-// Collect segments for the whole track and deliver them only once the
-// separation is complete - playback resumes in sync afterwards.
 async function readFrames(job, videoId, res) {
   const reader = res.body.getReader();
   let buf = new Uint8Array(0);
@@ -240,11 +222,6 @@ function concatBytes(a, b) {
   return out;
 }
 
-/* ---------------- local stem cache (IndexedDB) ---------------- */
-
-// Keeps the downloaded AAC stems per videoId so repeat plays never touch the
-// server. Persists across browser restarts; evicts the oldest songs past a
-// cap. Any failure here is non-fatal - playback falls back to the server.
 const IDB_NAME = "isolate-stems";
 const IDB_STORE = "songs";
 const IDB_MAX_SONGS = 50;
@@ -290,7 +267,6 @@ async function idbPut(videoId, record) {
   } catch (e) {}
 }
 
-// Keep only the newest IDB_MAX_SONGS songs (by last-used timestamp).
 async function idbEvict() {
   try {
     const db = await idbOpen();

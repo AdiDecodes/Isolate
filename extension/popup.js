@@ -68,9 +68,10 @@
     $("aiBtn").classList.toggle("active", !!state.aiEnabled);
     $("autoBtn").classList.toggle("active", state.autoSeparate !== false);
     const blocked = (state.status || {}).stage === "blocked";
+    const lengthBlocked = blocked && (state.status.message || "").includes("longer than 10 min");
     $("sepNow").classList.toggle(
       "hidden",
-      !(state.aiEnabled && (state.autoSeparate === false || blocked))
+      !(state.aiEnabled && (state.autoSeparate === false || (blocked && !lengthBlocked)))
     );
 
     const s = state.status || {};
@@ -127,8 +128,6 @@
     setTimeout(refresh, 1200);
   });
 
-  /* ---------------- account ---------------- */
-
   const SERVER = "https://isolate443.duckdns.org";
 
   function getToken() {
@@ -142,8 +141,6 @@
       $("acctIn").classList.add("hidden");
       $("signin").classList.remove("hidden");
       $("signout").classList.add("hidden");
-      // The sign-in may have completed while the service worker was dead -
-      // nudge it to resume polling the parked token.
       const { authPendingCode } = await chrome.storage.local
         .get("authPendingCode")
         .catch(() => ({}));
@@ -159,7 +156,6 @@
       const res = await fetch(SERVER + "/me", {
         headers: { Authorization: "Bearer " + token },
       });
-      console.log("[isolate] /me:", res.status);
       if (res.ok) me = await res.json();
       else if (res.status === 401) await chrome.storage.local.remove("token");
       else if (res.status === 403)
@@ -199,17 +195,12 @@
 
   $("signin").addEventListener("click", async () => {
     const code = crypto.randomUUID();
-    // Persist before opening the tab: this popup dies when the tab takes
-    // focus, and the stored code lets the service worker resume the poll
-    // even if the auth-begin message is lost with it.
     await chrome.storage.local.set({ authPendingCode: code }).catch(() => {});
     try {
       await chrome.tabs.create({
         url: SERVER + "/auth?code=" + encodeURIComponent(code),
       });
     } catch (e) {}
-    // Opening the tab closes this popup; the background service worker
-    // owns the polling and stores the token, then broadcasts auth-ok.
     chrome.runtime.sendMessage({ type: "auth-begin", code }).catch(() => {});
     const btn = $("signin");
     btn.disabled = true;

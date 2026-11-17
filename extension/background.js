@@ -1,36 +1,21 @@
-// Service worker: takes the videoId from the tab and hands it to the
-// offscreen document, which streams audio through the local separation
-// server and routes the resulting stems back to the tab.
-
 const OFFSCREEN_URL = "offscreen.html";
 const API_ROOT = "https://isolate443.duckdns.org";
 
-const jobs = new Map(); // videoId -> { tabId, stage, ts }
+const jobs = new Map();
 
-// Resume a sign-in poll if the service worker restarted mid-flow.
 chrome.storage.local
   .get("authPendingCode")
   .then(({ authPendingCode }) => {
-    if (authPendingCode) {
-      console.log("[isolate] auth: resuming pending poll");
-      pollAuth(authPendingCode);
-    }
+    if (authPendingCode) pollAuth(authPendingCode);
   })
   .catch(() => {});
 
-// Login polling runs here (not in the popup): opening the login tab closes
-// the popup, so its own poll loop would die before the user finishes
-// signing in. The service worker keeps polling and stores the token.
 let authPollingCode = null;
 
 async function pollAuth(code) {
   if (!code || authPollingCode === code) return;
   authPollingCode = code;
-  console.log("[isolate] auth: polling", code.slice(0, 8) + "…");
   const deadline = Date.now() + 10 * 60 * 1000;
-  // MV3 kills the service worker after ~30s of inactivity, and a timer
-  // sleep doesn't count as activity - ping an extension API so the poll
-  // loop survives the whole sign-in window.
   const keepAlive = setInterval(
     () => chrome.runtime.getPlatformInfo(() => {}),
     20000
@@ -42,7 +27,6 @@ async function pollAuth(code) {
         const data = await res.json();
         if (data.status === "ok" && data.token) {
           await chrome.storage.local.set({ token: data.token });
-          console.log("[isolate] auth: token stored");
           chrome.runtime.sendMessage({ type: "auth-ok" }).catch(() => {});
           return;
         }
@@ -59,7 +43,6 @@ async function pollAuth(code) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  console.log("[isolate] message:", msg.type, msg.videoId || "");
   if (msg.type === "ai-request") {
     handleRequest(msg.videoId, sender.tab?.id).catch((e) =>
       reportError(msg.videoId, String(e && e.message ? e.message : e))
@@ -67,7 +50,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
   } else if (msg.type === "cache-check") {
     isCached(msg.videoId).then((cached) => sendResponse({ cached }));
-    return true; // async sendResponse
+    return true;
   } else if (msg.type === "auth-begin") {
     chrome.storage.local.set({ authPendingCode: msg.code }).catch(() => {});
     pollAuth(msg.code);
@@ -85,8 +68,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
-// A job that hasn't reported progress for this long is considered dead
-// and a new request may replace it instead of being silently ignored.
 const JOB_STALE_MS = 120000;
 
 function jobActive(job) {
@@ -102,16 +83,13 @@ async function routeToTab(msg) {
   const job = jobs.get(msg.videoId);
   if (job) {
     job.ts = Date.now();
-    // Track terminal states so jobActive() stops blocking re-requests.
     if (msg.type === "ai-progress" && msg.stage === "done") job.stage = "done";
   }
   const tabId = job?.tabId;
   if (tabId == null) return;
   try {
     await chrome.tabs.sendMessage(tabId, msg);
-  } catch (e) {
-    /* tab gone */
-  }
+  } catch (e) {}
 }
 
 function reportError(videoId, message) {
@@ -131,9 +109,7 @@ async function ensureOffscreen() {
   }
 }
 
-// Does the server already hold separated stems for this video? Memoized so
-// repeated probes (video-change ticks, job starts) don't hit the network.
-const cachedProbe = new Map(); // videoId -> { cached, ts }
+const cachedProbe = new Map();
 const PROBE_TTL_MS = 10 * 60 * 1000;
 
 async function isCached(videoId) {
@@ -154,7 +130,6 @@ async function handleRequest(videoId, tabId, start) {
   if (jobActive(jobs.get(videoId))) return;
 
   const cached = await isCached(videoId);
-  // Cached songs skip straight to stem fetch - no "Resolving stream…" stage.
   jobs.set(videoId, { tabId, stage: cached ? "processing" : "extracting", ts: Date.now() });
   if (!cached) routeToTab({ type: "ai-progress", videoId, stage: "extracting" });
 

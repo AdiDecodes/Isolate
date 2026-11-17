@@ -11,17 +11,15 @@
   let lastVideoId = null;
   let lastRequestedVideoId = null;
   let lastCacheCheck = null;
-  let cacheState = "idle"; // idle | pending | cached | miss
+  let cacheState = "idle";
   let pendingAfterProbe = null;
-  let stemFetch = null; // { videoId } while the direct fetch runs
-  let stemFetchFailed = false; // stop retry loops; use the offscreen path
+  let stemFetch = null;
+  let stemFetchFailed = false;
   let songCached = false;
   let lastIsMusic = false;
-  let metaVideoId = null; // videoId reported by the player (YT Music inline playback)
+  let metaVideoId = null;
 
   const SERVER = "https://isolate443.duckdns.org";
-
-  /* ---------------- mode + AI plumbing ---------------- */
 
   function post(payload) {
     window.postMessage({ type: MSG, ...payload }, window.location.origin);
@@ -47,9 +45,7 @@
   function persist(obj) {
     try {
       chrome.storage?.sync.set(obj);
-    } catch (e) {
-      /* storage unavailable */
-    }
+    } catch (e) {}
   }
 
   try {
@@ -63,11 +59,8 @@
         requestIfNeeded();
       }
     });
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) {}
 
-  // Answer the main-world engine whenever it asks for the current state.
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data || e.data.type !== MSG) return;
     if (e.data.kind === "ready") {
@@ -78,10 +71,8 @@
       metaVideoId = e.data.videoId || null;
       lastIsMusic = !!e.data.isMusic;
       if (aiEnabled && !lastRequestedVideoId && currentVideoId()) requestIfNeeded();
-      // Meta may arrive after the cache probe - retry the autofetch then.
       if (songCached && aiEnabled && lastIsMusic) requestIfNeeded(true);
     } else if (e.data.kind === "ai-stems-done") {
-      // Direct fetch path: the page engine decoded and segmented both stems.
       const videoId = currentVideoId();
       if (!stemFetch || stemFetch.videoId !== videoId || !stemFetch.decoded) return;
       stemFetch = null;
@@ -91,15 +82,11 @@
       post({ kind: "ai-done" });
     } else if (e.data.kind === "ai-stems-failed") {
       stemFetch = null;
-      // Direct path broke (e.g. decode) - fall back to the offscreen pipeline.
       lastRequestedVideoId = null;
       if (aiEnabled) requestIfNeeded(true);
     }
   });
 
-  /* ---------------- results from the service worker ---------------- */
-
-  // Last known AI job state, surfaced to the popup.
   let aiStatus = { stage: null, pct: null, sec: null, message: null };
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -119,8 +106,6 @@
       const { type, ...rest } = msg;
       post({ kind: "ai-segment", ...rest });
     } else if (msg.type === "ai-ready") {
-      // Enough cached stems are relayed to start playback; the job keeps
-      // finishing in the background.
       lastRequestedVideoId = msg.videoId;
       post({ kind: "ai-ready" });
     } else if (msg.type === "ai-error") {
@@ -182,8 +167,6 @@
   }
 
   function currentVideoId() {
-    // Watch pages have ?v=; YT Music inline playback doesn't - fall back to
-    // the videoId the page engine reads from the player.
     try {
       const v = new URLSearchParams(location.search).get("v");
       if (v) return v;
@@ -199,8 +182,6 @@
     const video = document.querySelector("video");
     const duration = video && isFinite(video.duration) ? video.duration : null;
     if (!lastIsMusic && !force) {
-      // Category metadata misses plenty of real music videos, so this is
-      // only a guard for the auto path; Separate now overrides it.
       aiStatus = {
         stage: "blocked",
         pct: null,
@@ -210,8 +191,8 @@
       updateAiStatus("blocked", null, aiStatus.message);
       return;
     }
-    if (duration == null) return; // metadata not loaded yet - retry on the next tick
-    if (duration > 600) {
+    if (duration == null) return;
+    if (duration > MAX_DURATION_SECONDS) {
       aiStatus = { stage: "blocked", pct: null, sec: null, message: "Skipped: longer than 10 min" };
       updateAiStatus("blocked", null, aiStatus.message);
       return;
@@ -222,15 +203,13 @@
       return;
     }
 
-    // Cached songs: fetch the stems directly in this tab and hand the raw
-    // binary to the page engine - no extension-messaging JSON relay.
     if (cacheState === "cached" && !stemFetchFailed) {
       lastRequestedVideoId = videoId;
       startStemsFetch(videoId);
       return;
     }
     if (cacheState === "pending") {
-      pendingAfterProbe = force; // decide after the probe answers
+      pendingAfterProbe = force;
       return;
     }
 
@@ -244,8 +223,6 @@
     updateAiStatus("requested");
   }
 
-  // Direct fetch of both cached stems with download progress on the ring.
-  // Uses the browser HTTP cache on repeat plays (server sends immutable).
   function startStemsFetch(videoId) {
     if (stemFetch) return;
     stemFetch = { videoId };
@@ -253,8 +230,6 @@
     updateAiStatus("cached", 0);
 
     const fetchStem = async (file) => {
-      // Attach the token when present: blocked accounts are rejected here
-      // instead of silently riding the anonymous path.
       const headers = {};
       try {
         const t = (await chrome.storage.local.get("token")).token;
@@ -272,7 +247,6 @@
         chunks.push(value);
         got += value.length;
         if (total && stemFetch && stemFetch.videoId === videoId) {
-          // 0-50% per file, so both together map to 0-100%.
           const pct = Math.min(50, Math.round((got / total) * 50));
           aiStatus.pct = stemFetch.vocalsDone ? 50 + pct : pct;
           updateAiStatus("cached", aiStatus.pct);
@@ -296,14 +270,11 @@
         stemFetch.vocalsDone = true;
         const bgm = await fetchStem("bgm.m4a");
         if (!stemFetch || stemFetch.videoId !== videoId) return;
-        // Keep stemFetch alive until the engine reports back (ai-stems-done).
         stemFetch.decoded = true;
         post({ kind: "ai-stems", vocals, bgm, sampleRate: 44100 });
       } catch (e) {
         if (!stemFetch || stemFetch.videoId !== videoId) return;
         stemFetch = null;
-        // Direct path failed - fall back to the offscreen pipeline and stop
-        // retrying the direct fetch for this video.
         stemFetchFailed = true;
         lastRequestedVideoId = null;
         requestIfNeeded(true);
@@ -311,7 +282,6 @@
     })();
   }
 
-  // SPA navigation: new video -> reset engine state, wait for fresh meta.
   setInterval(() => {
     const videoId = currentVideoId();
     post({ kind: "get-meta" });
@@ -327,9 +297,6 @@
       aiStatus = { stage: null, pct: null, sec: null, message: null };
       pushAiState();
     }
-    // Passive probe: is this song already separated on the server? Cached
-    // songs light the FAB green and take the fast direct-fetch path below -
-    // bulk audio must NOT go through chrome.runtime messaging (JSON hop).
     if (videoId && videoId !== lastCacheCheck) {
       lastCacheCheck = videoId;
       cacheState = "pending";
@@ -364,8 +331,6 @@
     requestIfNeeded(force);
   }
 
-  // Only surface the cached hint when nothing else is going on - never
-  // overwrite an in-flight job, error, or done state.
   function indicateCached() {
     const idle =
       !aiStatus.stage || aiStatus.stage === "off" || aiStatus.stage === "standby";
@@ -373,8 +338,6 @@
     aiStatus = { stage: "cached-ready", pct: 100, sec: null, message: null };
     updateAiStatus("cached-ready", 100);
   }
-
-  /* ---------------- floating mode button ---------------- */
 
   const MODE_META = {
     vocals: {
@@ -396,9 +359,14 @@
 
   const RING_CIRC = 2 * Math.PI * 27;
 
-  // Anchors for the topbar right-hand cluster, tried in order: the Create
-  // button first, then the avatar/settings buttons. Container ids are the
-  // last resort - they differ between YouTube and YT Music layouts.
+  const MAX_DURATION_SECONDS = 600;
+
+  function videoTooLong() {
+    const video = document.querySelector("video");
+    const duration = video && isFinite(video.duration) ? video.duration : null;
+    return duration != null && duration > MAX_DURATION_SECONDS;
+  }
+
   const TOPBAR_ANCHORS = [
     "#create-button",
     "ytd-button-renderer#upload-button",
@@ -409,6 +377,12 @@
   ];
 
   function ensureFloatingButton() {
+    if (videoTooLong()) {
+      const existing = document.getElementById(FLOAT_ID);
+      if (existing && existing.isConnected) existing.remove();
+      return;
+    }
+
     let btn = document.getElementById(FLOAT_ID);
 
     const masthead = document.querySelector("ytd-masthead, ytmusic-nav-bar");
@@ -430,10 +404,6 @@
           masthead
         : null;
 
-    // Already sitting exactly where we want it (right before the anchor, or
-    // at the end of the cluster) - leave it alone. Otherwise re-place it:
-    // this is what rescues the button out of the body-fallback bubble once
-    // the masthead renders.
     if (btn && btn.isConnected) {
       const settled =
         !slot || (btn.parentNode === slot && (!anchor || btn.nextElementSibling === anchor));
@@ -511,7 +481,6 @@
       btn.classList.add("cc-ring-green");
       off = 0;
     } else if (stage === "cached-ready") {
-      // Song is already separated on the server: full green ring.
       btn.classList.add("cc-ring-green");
       off = 0;
     } else if (stage === "cached") {
@@ -522,11 +491,8 @@
   }
 
   function updateAiStatus(stage, pct, message, sec) {
-    // Ring state only - details live in the popup.
     updateRing(stage, pct);
   }
-
-  /* ---------------- lifecycle ---------------- */
 
   function watchDOM() {
     const obs = new MutationObserver(() => ensureFloatingButton());
