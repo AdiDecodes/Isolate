@@ -99,13 +99,12 @@ function page(title: string, body: string): string {
 <title>${title} — Isolate</title>
 <style>
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-    background:#0f0f0f;color:#f1f1f1;font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif}
-  .card{background:#1c1c1c;border:1px solid #2a2a2a;border-radius:14px;padding:28px 30px;
-    max-width:380px;text-align:center}
-  h1{font-size:17px;margin:0 0 10px}
+    background:#0f0f0f;color:#f1f1f1;font:16px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif}
+  .card{padding:28px 30px;max-width:380px;text-align:center}
+  h1{font-size:16px;font-weight:600;margin:0 0 10px}
   p{color:#9a9a9a;margin:0 0 16px}
   a.btn{display:inline-block;background:#ff3d3d;color:#fff;text-decoration:none;
-    padding:10px 18px;border-radius:9px;font-weight:600}
+    padding:10px 18px;border:0;border-radius:0;font-weight:600}
   .ok{color:#00d4a0;font-weight:600}
 </style></head><body><div class="card">${body}</div></body></html>`;
 }
