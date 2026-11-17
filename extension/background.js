@@ -7,6 +7,17 @@ const API_ROOT = "https://isolate443.duckdns.org";
 
 const jobs = new Map(); // videoId -> { tabId, stage, ts }
 
+// Resume a sign-in poll if the service worker restarted mid-flow.
+chrome.storage.local
+  .get("authPendingCode")
+  .then(({ authPendingCode }) => {
+    if (authPendingCode) {
+      console.log("[isolate] auth: resuming pending poll");
+      pollAuth(authPendingCode);
+    }
+  })
+  .catch(() => {});
+
 // Login polling runs here (not in the popup): opening the login tab closes
 // the popup, so its own poll loop would die before the user finishes
 // signing in. The service worker keeps polling and stores the token.
@@ -15,7 +26,15 @@ let authPollingCode = null;
 async function pollAuth(code) {
   if (!code || authPollingCode === code) return;
   authPollingCode = code;
+  console.log("[isolate] auth: polling", code.slice(0, 8) + "…");
   const deadline = Date.now() + 10 * 60 * 1000;
+  // MV3 kills the service worker after ~30s of inactivity, and a timer
+  // sleep doesn't count as activity — ping an extension API so the poll
+  // loop survives the whole sign-in window.
+  const keepAlive = setInterval(
+    () => chrome.runtime.getPlatformInfo(() => {}),
+    20000
+  );
   try {
     while (Date.now() < deadline && authPollingCode === code) {
       try {
@@ -23,7 +42,7 @@ async function pollAuth(code) {
         const data = await res.json();
         if (data.status === "ok" && data.token) {
           await chrome.storage.local.set({ token: data.token });
-          authPollingCode = null;
+          console.log("[isolate] auth: token stored");
           chrome.runtime.sendMessage({ type: "auth-ok" }).catch(() => {});
           return;
         }
@@ -31,7 +50,11 @@ async function pollAuth(code) {
       await new Promise((r) => setTimeout(r, 3000));
     }
   } finally {
-    if (authPollingCode === code) authPollingCode = null;
+    clearInterval(keepAlive);
+    if (authPollingCode === code) {
+      authPollingCode = null;
+      chrome.storage.local.remove("authPendingCode").catch(() => {});
+    }
   }
 }
 
@@ -46,6 +69,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     isCached(msg.videoId).then((cached) => sendResponse({ cached }));
     return true; // async sendResponse
   } else if (msg.type === "auth-begin") {
+    chrome.storage.local.set({ authPendingCode: msg.code }).catch(() => {});
     pollAuth(msg.code);
     sendResponse({ ok: true });
   } else if (
