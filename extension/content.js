@@ -389,39 +389,70 @@
 
   const RING_CIRC = 2 * Math.PI * 27;
 
+  // Anchors for the topbar right-hand cluster, tried in order: the Create
+  // button first, then the avatar/settings buttons. Container ids are the
+  // last resort — they differ between YouTube and YT Music layouts.
+  const TOPBAR_ANCHORS = [
+    "#create-button",
+    "ytd-button-renderer#upload-button",
+    'ytd-button-renderer:has([aria-label="Create"])',
+    "ytd-topbar-menu-button-renderer",
+    "ytmusic-account-button",
+    "ytmusic-settings-button",
+  ];
+
   function ensureFloatingButton() {
-    const existing = document.getElementById(FLOAT_ID);
-    if (existing && existing.isConnected) return;
-    if (existing) existing.remove();
+    let btn = document.getElementById(FLOAT_ID);
 
-    const btn = document.createElement("button");
-    btn.id = FLOAT_ID;
-    btn.innerHTML =
-      '<svg class="cc-ring" viewBox="0 0 62 62">' +
-      '<circle class="cc-ring-track" cx="31" cy="31" r="27"/>' +
-      '<circle class="cc-ring-bar" cx="31" cy="31" r="27"/>' +
-      "</svg>" +
-      '<span class="cc-float-icon"></span>';
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const next = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
-      applyMode(next);
-    });
-
-    // Topbar placement: left of the Create button (YouTube) or the account /
-    // settings buttons (YT Music). Anchor off the buttons themselves instead
-    // of container ids — those differ between layouts and over time. Falls
-    // back to the floating bubble when no topbar anchor exists.
     const masthead = document.querySelector("ytd-masthead, ytmusic-nav-bar");
+    let anchor = null;
     if (masthead) {
-      const anchor = masthead.querySelector(
-        "#create-button, ytmusic-account-button, ytmusic-settings-button, ytd-topbar-menu-button-renderer"
-      );
-      if (anchor && anchor.parentNode) {
-        anchor.parentNode.insertBefore(btn, anchor);
-      } else {
-        masthead.appendChild(btn);
+      for (const sel of TOPBAR_ANCHORS) {
+        try {
+          anchor = masthead.querySelector(sel);
+        } catch (e) {
+          anchor = null;
+        }
+        if (anchor) break;
       }
+    }
+    const slot = anchor
+      ? anchor.parentNode
+      : masthead
+        ? masthead.querySelector("#buttons, #end, .right-header-buttons, #right-header-buttons") ||
+          masthead
+        : null;
+
+    // Already sitting exactly where we want it (right before the anchor, or
+    // at the end of the cluster) — leave it alone. Otherwise re-place it:
+    // this is what rescues the button out of the body-fallback bubble once
+    // the masthead renders.
+    if (btn && btn.isConnected) {
+      const settled =
+        !slot || (btn.parentNode === slot && (!anchor || btn.nextElementSibling === anchor));
+      if (settled) return;
+      btn.remove();
+    }
+
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = FLOAT_ID;
+      btn.innerHTML =
+        '<svg class="cc-ring" viewBox="0 0 62 62">' +
+        '<circle class="cc-ring-track" cx="31" cy="31" r="27"/>' +
+        '<circle class="cc-ring-bar" cx="31" cy="31" r="27"/>' +
+        "</svg>" +
+        '<span class="cc-float-icon"></span>';
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const next = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+        applyMode(next);
+      });
+    }
+
+    if (slot) {
+      if (anchor) slot.insertBefore(btn, anchor);
+      else slot.appendChild(btn);
     } else {
       document.body.append(btn);
     }
